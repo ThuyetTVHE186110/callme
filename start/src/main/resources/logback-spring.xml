@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dev keeps Spring Boot's familiar colored console output — readable in a terminal
+  while iterating. Prod switches to one-JSON-object-per-line on stdout: container
+  platforms (Docker/K8s) capture stdout verbatim and ship it to a log aggregator
+  (ELK/Loki/CloudWatch), which can then index/query/alert on `level`, `logger`,
+  `correlationId` etc. as real fields instead of regex-scraping a text blob.
+  `correlationId` (MDC) is the same id `GlobalExceptionHandler` hands back to a
+  client on a 500 — grepping logs for it is how support traces "what actually
+  happened" for a specific failed request.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProfile name="dev">
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+        <logger name="com.callme" level="DEBUG"/>
+    </springProfile>
+
+    <springProfile name="prod">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdcKeyName>correlationId</includeMdcKeyName>
+                <customFields>{"application":"${spring.application.name:-callme}"}</customFields>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+        <logger name="com.callme" level="INFO"/>
+    </springProfile>
+</configuration>

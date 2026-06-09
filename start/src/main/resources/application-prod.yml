@@ -1,0 +1,46 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      # Sized for a modest single-instance Postgres (CLAUDE.md targets MVP scale,
+      # not a sharded fleet — see §3 G.4 on `findAvailableNear` scaling being a
+      # later concern). Tune `maximum-pool-size` against `max_connections` on the
+      # DB side as more app instances are added — the classic shared-resource trap.
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      # Logs a warning with a stack trace if a connection is held > 60s without
+      # being returned — catches connection leaks (a missing close/try-with-resources
+      # in some adapter) long before they exhaust the pool and take the app down.
+      leak-detection-threshold: 60000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+springdoc:
+  # Off by default in prod — a published API surface is itself useful intel for an
+  # attacker, and CLAUDE.md's actual prod consumers are mobile apps that ship with
+  # the contract baked in, not browsers exploring /swagger-ui.html. Flip it on
+  # deliberately (e.g. for a partner-integration phase) via env var, not by default.
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:1440}
+  cors:
+    # No default — forces an explicit, reviewed list of real origins at deploy time,
+    # the same posture as JWT_SECRET/DB_* above (CLAUDE.md production posture: no
+    # silent fallbacks for anything security-relevant).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}

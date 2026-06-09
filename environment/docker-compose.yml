@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: callme
+      POSTGRES_USER: callme
+      POSTGRES_PASSWORD: callme
+    ports:
+      - "5432:5432"
+    volumes:
+      - callme-postgres-data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: ..
+      dockerfile: environment/Dockerfile
+    depends_on:
+      - postgres
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/callme
+      SPRING_DATASOURCE_USERNAME: callme
+      SPRING_DATASOURCE_PASSWORD: callme
+    ports:
+      - "8080:8080"
+
+volumes:
+  callme-postgres-data:

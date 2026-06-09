@@ -1,0 +1,60 @@
+name: CI
+
+# Builds the full reactor and runs every module's test suite (including the
+# Flyway-migration-validating tests in `start`) against a real Postgres service
+# container — the same database engine prod runs on, so the suite catches
+# dialect-specific issues (timezone handling, check constraints, etc.) that an
+# in-memory substitute would hide. Mirrors the local verification loop documented
+# in CLAUDE.md (spin up `postgres:16-alpine`, point the reactor at it, tear down).
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: callme
+          POSTGRES_PASSWORD: callme
+          POSTGRES_DB: callme
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U callme"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Make mvnw executable
+        run: chmod +x ./mvnw
+
+      - name: Build and run tests against Postgres
+        run: >
+          ./mvnw -B -ntp -pl start -am test
+          -Dspring.datasource.url=jdbc:postgresql://localhost:5432/callme
+          -Dspring.datasource.username=callme
+          -Dspring.datasource.password=callme
+
+      - name: Publish surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/*'
+          retention-days: 7

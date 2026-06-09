@@ -1,0 +1,10 @@
+spring:
+  jpa:
+    # Same as dev/prod — Flyway owns the schema, Hibernate only cross-validates.
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  # No datasource.url here — left for @ServiceConnection to inject the
+  # Testcontainers-managed PostgreSQL endpoint programmatically. Keeping this
+  # absent is what lets the container URL win over whatever application-dev.yml
+  # might have set on the same property key.

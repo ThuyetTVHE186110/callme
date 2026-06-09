@@ -1,0 +1,733 @@
+{
+  "info": {
+    "name": "Callme — Đặt người lái xe hộ",
+    "description": "Bộ test đầy đủ các luồng nghiệp vụ theo CLAUDE.md.\n\nChạy folder \"Happy Path\" theo thứ tự để xem toàn bộ lifecycle.\nMỗi lần chạy collection sẽ tự tạo số điện thoại mới (tránh 409).\nCác folder còn lại test edge case độc lập.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// Sinh suffix ngẫu nhiên 6 chữ số cho mỗi lần chạy collection,",
+          "// đảm bảo số điện thoại chưa tồn tại trong DB — tránh 409 trên register.",
+          "if (!pm.collectionVariables.get('runSuffix')) {",
+          "    const suffix = Date.now().toString().slice(-6);",
+          "    pm.collectionVariables.set('runSuffix', suffix);",
+          "    pm.collectionVariables.set('customerPhone', '0901' + suffix);",
+          "    pm.collectionVariables.set('driverPhone',   '0902' + suffix);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl",        "value": "http://localhost:8080", "type": "string" },
+    { "key": "runSuffix",      "value": "", "type": "string" },
+    { "key": "customerPhone",  "value": "", "type": "string" },
+    { "key": "driverPhone",    "value": "", "type": "string" },
+    { "key": "customerToken",  "value": "", "type": "string" },
+    { "key": "driverToken",    "value": "", "type": "string" },
+    { "key": "adminToken",     "value": "", "type": "string" },
+    { "key": "customerId",     "value": "", "type": "string" },
+    { "key": "driverId",       "value": "", "type": "string" },
+    { "key": "bookingId",      "value": "", "type": "string" },
+    { "key": "tripId",         "value": "", "type": "string" },
+    { "key": "paymentId",      "value": "", "type": "string" },
+    { "key": "ratingId",       "value": "", "type": "string" },
+    { "key": "notificationId", "value": "", "type": "string" }
+  ],
+  "item": [
+
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Đăng ký khách hàng",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('register ok', () => pm.response.to.be.success);",
+            "pm.collectionVariables.set('customerToken', r.data.token);",
+            "pm.collectionVariables.set('customerId',    r.data.profileId);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Nguyễn Văn Khách\",\n  \"phoneNumber\": \"{{customerPhone}}\",\n  \"password\": \"password123\",\n  \"email\": \"khach@example.com\",\n  \"role\": \"CUSTOMER\"\n}" }
+          }
+        },
+        {
+          "name": "Đăng ký tài xế",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('register ok', () => pm.response.to.be.success);",
+            "pm.collectionVariables.set('driverToken', r.data.token);",
+            "pm.collectionVariables.set('driverId',    r.data.profileId);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Trần Văn Tài\",\n  \"phoneNumber\": \"{{driverPhone}}\",\n  \"password\": \"password123\",\n  \"role\": \"DRIVER\"\n}" }
+          }
+        },
+        {
+          "name": "Đăng nhập khách hàng",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('login ok', () => pm.response.to.be.success);",
+            "pm.collectionVariables.set('customerToken', r.data.token);",
+            "pm.collectionVariables.set('customerId',    r.data.profileId);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phoneNumber\": \"{{customerPhone}}\",\n  \"password\": \"password123\"\n}" }
+          }
+        },
+        {
+          "name": "Đăng nhập tài xế",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('login ok', () => pm.response.to.be.success);",
+            "pm.collectionVariables.set('driverToken', r.data.token);",
+            "pm.collectionVariables.set('driverId',    r.data.profileId);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phoneNumber\": \"{{driverPhone}}\",\n  \"password\": \"password123\"\n}" }
+          }
+        },
+        {
+          "name": "Đăng nhập admin (tạo account ADMIN trong DB trước)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "if (pm.response.to.be.success) pm.collectionVariables.set('adminToken', r.data.token);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phoneNumber\": \"0900000000\",\n  \"password\": \"admin123\"\n}" }
+          }
+        },
+        {
+          "name": "[Error] Đăng ký trùng số điện thoại → 409",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('409 conflict', () => pm.response.to.have.status(409));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Người Khác\",\n  \"phoneNumber\": \"{{customerPhone}}\",\n  \"password\": \"password123\",\n  \"role\": \"CUSTOMER\"\n}" }
+          }
+        },
+        {
+          "name": "[Error] Đăng nhập sai mật khẩu → 401",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('401 unauthorized', () => pm.response.to.have.status(401));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phoneNumber\": \"{{customerPhone}}\",\n  \"password\": \"saimatkhau\"\n}" }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Happy Path — Luồng hoàn chỉnh (chạy theo thứ tự)",
+      "description": "Chạy tuần tự từ trên xuống. Mỗi request tự lưu ID cần thiết cho request kế tiếp.\nĐảm bảo đã chạy \"Đăng ký khách hàng\" và \"Đăng ký tài xế\" trong folder Auth trước.",
+      "item": [
+        {
+          "name": "1. Tài xế bật online",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('online ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/drivers/{{driverId}}/online-status",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"online\": true\n}" }
+          }
+        },
+        {
+          "name": "2. Tài xế báo vị trí (gần điểm đón)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('location ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/locations/{{driverId}}",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 10.7769,\n  \"longitude\": 106.7009\n}" }
+          }
+        },
+        {
+          "name": "3. Khách đặt chuyến (→ lưu bookingId)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('booking created', () => pm.response.to.be.success);",
+            "pm.collectionVariables.set('bookingId', r.data);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/bookings",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Idempotency-Key", "value": "happy-path-{{runSuffix}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"pickupLatitude\": 10.7769,\n  \"pickupLongitude\": 106.7009,\n  \"destinationLatitude\": 10.7285,\n  \"destinationLongitude\": 106.7239\n}" }
+          }
+        },
+        {
+          "name": "4. Kiểm tra booking đã CONFIRMED",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('booking ok', () => pm.response.to.be.success);",
+            "pm.test('status CONFIRMED', () => pm.expect(r.data.status).to.eql('CONFIRMED'));",
+            "pm.test('driver assigned', () => pm.expect(r.data.assignedDriverId).to.not.be.null);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "5. Lấy trip theo booking (→ lưu tripId)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('trip found', () => pm.response.to.be.success);",
+            "pm.test('status STARTED', () => pm.expect(r.data.status).to.eql('STARTED'));",
+            "pm.collectionVariables.set('tripId', r.data.id);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/trips/by-booking/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "6. Tài xế đến điểm đón",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('arrived ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/arrive",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverToken}}" }]
+          }
+        },
+        {
+          "name": "7. Tài xế xác nhận danh tính & nhận xe (→ IN_PROGRESS)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('pick-up ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/pick-up",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"identityVerified\": true\n}" }
+          }
+        },
+        {
+          "name": "8. Tài xế hoàn thành chuyến",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('complete ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/complete",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverToken}}" }]
+          }
+        },
+        {
+          "name": "9. Lấy thông tin payment (→ lưu paymentId)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('payment found', () => pm.response.to.be.success);",
+            "pm.test('status PENDING', () => pm.expect(r.data.status).to.eql('PENDING'));",
+            "pm.collectionVariables.set('paymentId', r.data.id);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/payments/by-trip/{{tripId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "10. Khách xác nhận thanh toán tiền mặt",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('payment confirmed', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}/confirm",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"method\": \"CASH\"\n}" }
+          }
+        },
+        {
+          "name": "11. Khách đánh giá tài xế (→ lưu ratingId)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('rating submitted', () => pm.response.to.be.success);",
+            "pm.collectionVariables.set('ratingId', r.data);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/ratings",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{tripId}}\",\n  \"score\": 5,\n  \"comment\": \"Tài xế chuyên nghiệp, lịch sự\",\n  \"complaint\": false\n}" }
+          }
+        },
+        {
+          "name": "12. Tài xế đánh giá khách",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('rating submitted', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/ratings",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{tripId}}\",\n  \"score\": 4,\n  \"comment\": \"Khách hợp tác tốt\",\n  \"complaint\": false\n}" }
+          }
+        },
+        {
+          "name": "13. Lấy ratings theo trip",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('2 ratings', () => pm.expect(r.data.length).to.eql(2));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/ratings/by-trip/{{tripId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "14. Xem thông báo của khách (→ lưu notificationId)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('has notifications', () => pm.response.to.be.success);",
+            "if (r.data && r.data.length > 0) pm.collectionVariables.set('notificationId', r.data[0].id);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/notifications/{{customerId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "15. Đánh dấu thông báo đã đọc",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('marked read', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/notifications/{{notificationId}}/read",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Driver",
+      "item": [
+        {
+          "name": "Danh sách tài xế online",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/drivers/online",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Tài xế tắt offline",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('offline ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/drivers/{{driverId}}/online-status",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"online\": false\n}" }
+          }
+        },
+        {
+          "name": "[Error] Tài xế đổi online-status của người khác → 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('403 forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/drivers/00000000-0000-0000-0000-000000000001/online-status",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"online\": true\n}" }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Edge Cases — Booking",
+      "item": [
+        {
+          "name": "Idempotency: đặt lại với cùng key → trả booking cũ",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const r = pm.response.json();",
+            "pm.test('ok', () => pm.response.to.be.success);",
+            "pm.test('same booking id', () => pm.expect(r.data).to.eql(pm.collectionVariables.get('bookingId')));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/bookings",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Idempotency-Key", "value": "happy-path-{{runSuffix}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"pickupLatitude\": 10.7769,\n  \"pickupLongitude\": 106.7009,\n  \"destinationLatitude\": 10.7285,\n  \"destinationLongitude\": 106.7239\n}" }
+          }
+        },
+        {
+          "name": "Hủy booking (CLAUDE.md A.5 — miễn phí nếu chưa CONFIRMED)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('cancel ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "[Error] Role DRIVER đặt booking → 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('403 forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/bookings",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"pickupLatitude\": 10.7769,\n  \"pickupLongitude\": 106.7009,\n  \"destinationLatitude\": 10.7285,\n  \"destinationLongitude\": 106.7239\n}" }
+          }
+        },
+        {
+          "name": "[Error] UUID không hợp lệ trong path → 400",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('400 bad request', () => pm.response.to.have.status(400));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/bookings/not-a-uuid",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Edge Cases — Trip",
+      "item": [
+        {
+          "name": "Đổi điểm đến giữa chuyến (CLAUDE.md C.5)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('destination changed', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/destination",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 10.8000,\n  \"longitude\": 106.6500\n}" }
+          }
+        },
+        {
+          "name": "SOS khẩn cấp (CLAUDE.md C.6)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('sos raised', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/sos",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"note\": \"Tài xế có biểu hiện bất thường\"\n}" }
+          }
+        },
+        {
+          "name": "Xe khách hỏng (CLAUDE.md C.3)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('breakdown reported', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/vehicle-breakdown",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"note\": \"Xe không nổ máy, cần gọi cứu hộ\"\n}" }
+          }
+        },
+        {
+          "name": "Khách không có mặt (no-show) (CLAUDE.md C.1)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('no-show ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/no-show",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverToken}}" }]
+          }
+        },
+        {
+          "name": "Tài xế hủy trước khi đến (B.4 — booking được điều phối lại)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('driver cancelled before pickup ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/driver-cancel-before-pickup",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverToken}}" }]
+          }
+        },
+        {
+          "name": "Tài xế kết thúc khẩn cấp giữa chuyến (CLAUDE.md E.2)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('abort ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/abort-in-progress",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"safeLatitude\": 10.7750,\n  \"safeLongitude\": 106.7000,\n  \"note\": \"Khách lên cơn, đã đưa xe vào lề đường an toàn\"\n}" }
+          }
+        },
+        {
+          "name": "[Error] Tài xế dùng cancel thường khi IN_PROGRESS → 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('403 forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverToken}}" }]
+          }
+        },
+        {
+          "name": "[Error] pick-up khi chưa arrive → 409",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('409 wrong status', () => pm.response.to.have.status(409));"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/pick-up",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"identityVerified\": true\n}" }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Edge Cases — Rating",
+      "item": [
+        {
+          "name": "Chỉnh sửa đánh giá trong vòng edit window (CLAUDE.md F.2)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('edit ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/ratings/{{ratingId}}",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"score\": 4,\n  \"comment\": \"Xem lại — tài xế có hơi vội\",\n  \"complaint\": false\n}" }
+          }
+        },
+        {
+          "name": "Nộp khiếu nại nghiêm trọng (complaint = true, CLAUDE.md F.1)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('complaint submitted', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/ratings",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tripId\": \"{{tripId}}\",\n  \"score\": 1,\n  \"comment\": \"Tài xế có hành vi quấy rối\",\n  \"complaint\": true\n}" }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Edge Cases — Payment",
+      "item": [
+        {
+          "name": "Thanh toán thất bại (CLAUDE.md D.3)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('failed ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}/fail",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverToken}}" }]
+          }
+        },
+        {
+          "name": "Retry thanh toán (CLAUDE.md D.3)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('retry ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}/retry",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Hoàn tiền (CLAUDE.md D.4 — chỉ admin)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('refund ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}/refund",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Admin — Hàng đợi CSKH",
+      "description": "Yêu cầu adminToken. Tạo account ADMIN trong DB trước:\nINSERT INTO accounts (id, phone_number, password_hash, role, active, profile_id) VALUES (gen_random_uuid(), '0900000000', '<bcrypt>', 'ADMIN', true, gen_random_uuid());",
+      "item": [
+        {
+          "name": "Danh sách SOS khẩn cấp (CLAUDE.md C.6)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/trips/sos",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Danh sách kết thúc khẩn cấp giữa chuyến (CLAUDE.md E.2)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/trips/emergency-aborts",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Danh sách đường vòng khả nghi (CLAUDE.md C.8)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/trips/route-deviations",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Danh sách khiếu nại nghiêm trọng (CLAUDE.md F.1)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/ratings/complaints",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Danh sách pattern đánh giá trả đũa (CLAUDE.md F.3)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/ratings/review-pattern-flags",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Danh sách thanh toán thất bại hết lượt retry (CLAUDE.md D.1)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('ok', () => pm.response.to.be.success);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/payments/unsettled",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        }
+      ]
+    }
+
+  ]
+}

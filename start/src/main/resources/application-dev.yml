@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/callme
+    username: callme
+    password: callme
+    hikari:
+      # Small pool for a single local Postgres instance shared with whatever else
+      # is running on the dev box — mirrors prod's *shape* (so pool exhaustion bugs
+      # surface here too) without prod's headroom.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 30000
+  jpa:
+    hibernate:
+      # Flyway (db/migration) owns the schema in every environment now — `validate`
+      # just keeps Hibernate honest against what the migrations actually produced,
+      # so a mismatch surfaces at boot time here in dev, not as a surprise in prod.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          # Windows reports the JVM timezone as "Asia/Saigon" (legacy alias) which
+          # PostgreSQL rejects. Pinning Hibernate's JDBC layer to UTC sidesteps the
+          # OS-timezone mismatch entirely — works from IDE, CLI, or Docker alike.
+          time_zone: UTC
+
+app:
+  cors:
+    # Common local dev ports for a web admin console (CRA/Vite/Next defaults).
+    allowed-origins: http://localhost:3000,http://localhost:5173

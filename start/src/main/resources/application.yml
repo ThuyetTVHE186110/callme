@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: callme
+  profiles:
+    active: dev
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only the probes orchestration needs (health) and the scrape target
+        # Prometheus needs are exposed publicly — everything else (env, beans,
+        # heapdump...) would leak internals and stays off by default.
+        include: health, prometheus
+  endpoint:
+    health:
+      # Liveness/readiness groups so Kubernetes (or any orchestrator) can probe
+      # "is the process alive" separately from "is it ready to take traffic"
+      # (e.g. still applying Flyway migrations) without one masking the other.
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-secret-key-change-me-please-this-is-not-for-production-use-32bytes}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:1440}
