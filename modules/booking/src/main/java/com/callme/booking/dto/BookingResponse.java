@@ -4,6 +4,7 @@ import com.callme.booking.entity.BookingStatus;
 import com.callme.common.shared.CancellationReason;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 public record BookingResponse(UUID id,
@@ -14,5 +15,6 @@ public record BookingResponse(UUID id,
                                String estimatedFareCurrency,
                                CancellationReason cancellationReason,
                                BigDecimal cancellationFeeAmount,
-                               String cancellationFeeCurrency) {
+                               String cancellationFeeCurrency,
+                               Instant scheduledAt) {
 }

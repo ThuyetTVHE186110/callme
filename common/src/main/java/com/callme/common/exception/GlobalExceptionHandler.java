@@ -79,6 +79,21 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * CLAUDE.md §4.8 — the SMS gateway failed to take an OTP. 503 (not 500): this is
+     * a known, transient upstream dependency failure the client should simply retry;
+     * the registration/reset transaction already rolled back with it. Details go to
+     * the log keyed by correlation id — never the response (the message could include
+     * gateway internals).
+     */
+    @ExceptionHandler(SmsDeliveryException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSmsDelivery(SmsDeliveryException ex) {
+        String correlationId = MDC.get(CORRELATION_ID_MDC_KEY);
+        log.error("OTP SMS delivery failed [{}]", correlationId, ex);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error("Không gửi được tin nhắn xác thực — vui lòng thử lại sau ít phút"));
+    }
+
+    /**
      * Anything that escapes every other handler is, by definition, a bug or an
      * infrastructure failure — never something the client can act on. Leaking
      * {@code ex.getMessage()} (stack traces, SQL fragments, internal class names)

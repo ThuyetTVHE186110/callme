@@ -1,10 +1,13 @@
 package com.callme.notification.event;
 
 import com.callme.common.event.BookingConfirmedEvent;
+import com.callme.common.event.DriverForcedOfflineEvent;
 import com.callme.common.event.GpsSignalLostEvent;
+import com.callme.common.event.IncidentReportedEvent;
 import com.callme.common.event.SosRaisedEvent;
 import com.callme.common.event.TripAbortedMidwayEvent;
 import com.callme.common.event.TripCompletedEvent;
+import com.callme.common.event.TripDestinationChangedEvent;
 import com.callme.notification.entity.NotificationType;
 import com.callme.notification.service.NotificationService;
 import org.springframework.stereotype.Component;
@@ -76,6 +79,47 @@ public class DomainEventListener {
                 "Chuyến đi của bạn đã kết thúc sớm giữa đường — tài xế đã đưa bạn và xe đến nơi an toàn. Tổng đài đã được thông báo và sẽ liên hệ hỗ trợ.");
         notificationService.notify(event.driverId(), NotificationType.TRIP_ABORTED_MIDWAY,
                 "Báo cáo kết thúc khẩn cấp giữa chuyến của bạn đã được ghi nhận — tổng đài sẽ xem xét và hỗ trợ điều phối tiếp theo.");
+    }
+
+    /**
+     * CLAUDE.md §4.2 — a collision/incident was reported. Both participants are
+     * notified that it's now on record and CSKH's liability investigation
+     * (`GET /api/trips/incidents`) will follow up — the same "someone is now looking
+     * at this" reassurance {@link #onSosRaised}/{@link #onTripAbortedMidway} give.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onIncidentReported(IncidentReportedEvent event) {
+        notificationService.notify(event.customerId(), NotificationType.INCIDENT_REPORTED,
+                "Một sự cố/va chạm trên chuyến đi của bạn đã được ghi nhận — tổng đài sẽ xem xét và liên hệ nếu cần.");
+        notificationService.notify(event.driverId(), NotificationType.INCIDENT_REPORTED,
+                "Một sự cố/va chạm trên chuyến đi của bạn đã được ghi nhận — tổng đài sẽ xem xét và liên hệ nếu cần.");
+    }
+
+    /**
+     * CLAUDE.md C.5/A.4 — the fare was re-quoted the moment the customer redirected
+     * the trip; both parties get the new price in writing (the customer also received
+     * it synchronously in the API response). The driver is mid-job in the customer's
+     * car — they deserve the same route/money transparency, not a surprise at the end.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onTripDestinationChanged(TripDestinationChangedEvent event) {
+        String fare = event.newFareEstimate().amount() + " " + event.newFareEstimate().currency().getCurrencyCode();
+        notificationService.notify(event.customerId(), NotificationType.DESTINATION_CHANGED,
+                "Điểm đến của chuyến đi đã được cập nhật — cước ước tính mới: " + fare + " (cước cuối tính tại thời điểm hoàn thành).");
+        notificationService.notify(event.driverId(), NotificationType.DESTINATION_CHANGED,
+                "Khách đã đổi điểm đến của chuyến đi — cước ước tính mới: " + fare + ".");
+    }
+
+    /**
+     * CLAUDE.md §4.5 — the driver was forced offline because a verification lapsed
+     * mid-shift. Telling them exactly why (and therefore what to renew) is the
+     * difference between a compliance nudge and a mysteriously dead income stream.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onDriverForcedOffline(DriverForcedOfflineEvent event) {
+        notificationService.notify(event.driverId(), NotificationType.VERIFICATION_EXPIRED,
+                "Bạn đã được chuyển sang trạng thái ngoại tuyến vì hồ sơ xác minh không còn hiệu lực: " + event.reasons()
+                        + ". Vui lòng liên hệ tổng đài để tái xác minh trước khi tiếp tục nhận chuyến.");
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)

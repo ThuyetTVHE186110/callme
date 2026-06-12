@@ -1,0 +1,73 @@
+# Production topology for a single DigitalOcean droplet (CLAUDE.md G.7).
+# Lives at /opt/callme/docker-compose.yml on the droplet — the CD pipeline scp's
+# this file (and the Caddyfile) on every deploy, so the repo stays authoritative.
+#
+# Only Caddy touches the public interface. The app and Postgres exist solely on
+# the internal Docker network: no published ports, nothing for a port scan to find.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: callme-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # Let's Encrypt certificates — must survive restarts
+      - caddy_config:/config
+    depends_on:
+      - app
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    image: ${APP_IMAGE}:${APP_TAG:-latest}
+    container_name: callme-app
+    restart: unless-stopped
+    mem_limit: 1200m # pairs with MaxRAMPercentage in the image — JVM sizes itself off this
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://db:5432/callme
+      DB_USERNAME: callme
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SMS_PROVIDER: ${SMS_PROVIDER:-speedsms}
+      SPEEDSMS_ACCESS_TOKEN: ${SPEEDSMS_ACCESS_TOKEN}
+      SPEEDSMS_SMS_TYPE: ${SPEEDSMS_SMS_TYPE:-4}
+      SPEEDSMS_SENDER: ${SPEEDSMS_SENDER:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+
+  db:
+    image: postgres:16-alpine
+    container_name: callme-db
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: callme
+      POSTGRES_USER: callme
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U callme -d callme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

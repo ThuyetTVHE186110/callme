@@ -2,6 +2,8 @@ package com.callme.driver.repository;
 
 import com.callme.driver.entity.Driver;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.UUID;
@@ -26,4 +28,8 @@ public interface DriverRepository extends JpaRepository<Driver, UUID> {
      */
     List<Driver> findByOnlineTrueAndOnTripFalseAndLastKnownLatitudeBetweenAndLastKnownLongitudeBetween(
             double minLatitude, double maxLatitude, double minLongitude, double maxLongitude);
+
+    /** CLAUDE.md G — multi-instance sweep guard; see {@code TripRepository#tryAdvisoryXactLock} for the full rationale. */
+    @Query(value = "select pg_try_advisory_xact_lock(:key)", nativeQuery = true)
+    boolean tryAdvisoryXactLock(@Param("key") long key);
 }

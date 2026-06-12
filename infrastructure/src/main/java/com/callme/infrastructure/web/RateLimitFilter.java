@@ -48,6 +48,8 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class RateLimitFilter extends OncePerRequestFilter {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RateLimitFilter.class);
+
     private record Rule(String method, PathPattern pathPattern, boolean keyByAuthenticatedUser, int capacity, Duration window) {
         Bucket newBucket() {
             return Bucket.builder()
@@ -61,6 +63,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final List<Rule> RULES = List.of(
             new Rule("POST", PATTERN_PARSER.parse("/api/auth/login"), false, 5, Duration.ofMinutes(1)),
             new Rule("POST", PATTERN_PARSER.parse("/api/auth/register"), false, 5, Duration.ofMinutes(1)),
+            // CLAUDE.md §4.8 — OTP endpoints. The per-IP caps here blunt scripted abuse
+            // from one source; the per-PHONE issuance cap (3/hour) lives in OtpService,
+            // since one number pumped from many IPs is invisible to an IP-keyed bucket.
+            new Rule("POST", PATTERN_PARSER.parse("/api/auth/verify-phone"), false, 10, Duration.ofMinutes(1)),
+            new Rule("POST", PATTERN_PARSER.parse("/api/auth/resend-verification"), false, 3, Duration.ofMinutes(1)),
+            new Rule("POST", PATTERN_PARSER.parse("/api/auth/forgot-password"), false, 3, Duration.ofMinutes(1)),
+            new Rule("POST", PATTERN_PARSER.parse("/api/auth/reset-password"), false, 10, Duration.ofMinutes(1)),
             new Rule("POST", PATTERN_PARSER.parse("/api/bookings"), true, 10, Duration.ofMinutes(1)),
             new Rule("POST", PATTERN_PARSER.parse("/api/locations/{driverId}"), true, 20, Duration.ofMinutes(1))
     );
@@ -87,6 +96,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (bucket.tryConsume(1)) {
             filterChain.doFilter(request, response);
         } else {
+            // OWASP A09 — a tripped limiter is a security signal (credential stuffing,
+            // scripted abuse), not just flow control; without this line it fired silently.
+            log.warn("Rate limit exceeded for {}", key);
             response.setStatus(429);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write(objectMapper.writeValueAsString(

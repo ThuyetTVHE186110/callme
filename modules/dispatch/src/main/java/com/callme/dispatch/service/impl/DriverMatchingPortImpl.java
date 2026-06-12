@@ -29,6 +29,17 @@ public class DriverMatchingPortImpl implements DriverMatchingPort {
     private static final int MAX_EXPANSIONS = 2;
     private static final double EXPANSION_FACTOR = 2.0;
 
+    /**
+     * CLAUDE.md B.3 — each no-response strike handicaps a candidate by this many
+     * kilometres of *effective* distance, instead of strikes being an absolute sort
+     * key. An absolute sort meant one strike permanently lost to every 0-strike
+     * driver however far away (10 km vs 200 m) — "hạ điểm ưu tiên" hardened into a
+     * de-facto lifetime ban, since strikes never decay. As a distance handicap, a
+     * lightly-struck nearby driver still wins against a clean faraway one, while the
+     * chronically unresponsive sink out of practical contention exactly as intended.
+     */
+    private static final double STRIKE_DISTANCE_PENALTY_KM = 2.0;
+
     private final DriverAvailabilityPort driverAvailabilityPort;
     private final DriverReservationPort driverReservationPort;
 
@@ -48,15 +59,20 @@ public class DriverMatchingPortImpl implements DriverMatchingPort {
      * up to {@link #MAX_EXPANSIONS} times before reporting "no driver found" (CLAUDE.md B.5).
      */
     @Override
-    public Optional<UUID> matchDriver(GeoPoint pickup, double radiusKm) {
+    public Optional<UUID> matchDriver(GeoPoint pickup, double radiusKm, UUID excludedDriverId) {
         double radius = radiusKm;
         for (int attempt = 0; attempt <= MAX_EXPANSIONS; attempt++) {
             var reserved = driverAvailabilityPort.findAvailableNear(pickup, radius).stream()
-                    // CLAUDE.md B.3 — chronically unresponsive drivers ("hạ điểm ưu tiên
-                    // hiển thị") sink behind responsive ones at the same rough distance,
-                    // rather than being offered the next customer at their expense.
-                    .sorted(Comparator.comparingInt(DriverSummary::noResponseStrikes)
-                            .thenComparingDouble(candidate -> pickup.distanceKm(candidate.lastKnownLocation())))
+                    // CLAUDE.md B.3/B.4 — never hand this job back to the driver who just
+                    // withdrew from it; they're back in the pool and often still the
+                    // nearest candidate. Applies across every radius expansion.
+                    .filter(candidate -> !candidate.driverId().equals(excludedDriverId))
+                    // CLAUDE.md B.3 — rank by effective distance: actual distance plus a
+                    // per-strike handicap ("hạ điểm ưu tiên hiển thị"), so unresponsive
+                    // history costs ground without becoming a lifetime ban.
+                    .sorted(Comparator.comparingDouble((DriverSummary candidate) ->
+                            pickup.distanceKm(candidate.lastKnownLocation())
+                                    + candidate.noResponseStrikes() * STRIKE_DISTANCE_PENALTY_KM))
                     .map(DriverSummary::driverId)
                     .filter(driverReservationPort::tryReserve)
                     .findFirst();

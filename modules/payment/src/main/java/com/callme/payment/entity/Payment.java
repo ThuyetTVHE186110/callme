@@ -27,6 +27,15 @@ public class Payment {
 
     private UUID customerId;
 
+    /**
+     * CLAUDE.md D.1 — the driver is the party physically collecting cash at the kerb,
+     * so they must be able to see this payment and report "khách từ chối thanh toán /
+     * không đủ tiền mặt". Without their id on the record, the D.1 CSKH queue could
+     * only ever be fed by the (often intoxicated, uncooperative) customer voluntarily
+     * reporting their own refusal — i.e. never.
+     */
+    private UUID driverId;
+
     private BigDecimal amount;
 
     private String currency;
@@ -55,9 +64,10 @@ public class Payment {
     public static final int MAX_RETRIES = 3;
 
     /** Opened the moment a trip completes — defaults to cash-on-arrival until the customer settles (CLAUDE.md flow step 10). */
-    public Payment(UUID tripId, UUID customerId, BigDecimal amount, String currency) {
+    public Payment(UUID tripId, UUID customerId, UUID driverId, BigDecimal amount, String currency) {
         this.tripId = tripId;
         this.customerId = customerId;
+        this.driverId = driverId;
         this.amount = amount;
         this.currency = currency;
         this.method = PaymentMethod.CASH;

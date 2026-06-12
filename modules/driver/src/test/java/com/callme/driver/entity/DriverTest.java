@@ -6,13 +6,15 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * CLAUDE.md B.1 (race-safe reservation), B.2 ("tài xế ảo" / stale-location detection)
- * and B.3 (no-response strikes) — pure entity-level invariants, no Spring context needed.
+ * CLAUDE.md B.1 (race-safe reservation), B.2 ("tài xế ảo" / stale-location detection),
+ * B.3 (no-response strikes) and §4.5/§4.2 (verification eligibility gating) — pure
+ * entity-level invariants, no Spring context needed.
  */
 class DriverTest {
 
@@ -20,7 +22,8 @@ class DriverTest {
 
     private Driver newDriver() {
         var driver = new Driver("Nguyễn Văn A");
-        driver.goOnline();
+        driver.recordVerification(BackgroundCheckStatus.APPROVED, LocalDate.parse("2030-01-01"), LocalDate.parse("2030-01-01"), NOW);
+        driver.goOnline(NOW);
         return driver;
     }
 
@@ -94,6 +97,66 @@ class DriverTest {
             driver.recordNoResponseStrike();
             driver.recordNoResponseStrike();
             assertThat(driver.getNoResponseStrikes()).isEqualTo(2);
+        }
+    }
+
+    /** CLAUDE.md §4.5/§4.2 — "Driver không thể chuyển online = true nếu bất kỳ xác minh nào đã hết hạn". */
+    @Nested
+    class Eligibility {
+
+        @Test
+        void aFreshlyRegisteredDriverIsNotEligible() {
+            var driver = new Driver("Nguyễn Văn A");
+
+            assertThat(driver.isEligibleToGoOnline(NOW)).isFalse();
+            assertThatThrownBy(() -> driver.goOnline(NOW)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        void aDriverWithAnExpiredLicenseIsNotEligible() {
+            var driver = new Driver("Nguyễn Văn A");
+            driver.recordVerification(BackgroundCheckStatus.APPROVED, LocalDate.parse("2020-01-01"), LocalDate.parse("2030-01-01"), NOW);
+
+            assertThat(driver.isEligibleToGoOnline(NOW)).isFalse();
+            assertThatThrownBy(() -> driver.goOnline(NOW)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        void aDriverWithExpiredInsuranceIsNotEligible() {
+            var driver = new Driver("Nguyễn Văn A");
+            driver.recordVerification(BackgroundCheckStatus.APPROVED, LocalDate.parse("2030-01-01"), LocalDate.parse("2020-01-01"), NOW);
+
+            assertThat(driver.isEligibleToGoOnline(NOW)).isFalse();
+            assertThatThrownBy(() -> driver.goOnline(NOW)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        void aDriverOverdueForReverificationIsNotEligible() {
+            var driver = new Driver("Nguyễn Văn A");
+            var verifiedAt = NOW.minus(Driver.REVERIFICATION_INTERVAL).minusSeconds(1);
+            driver.recordVerification(BackgroundCheckStatus.APPROVED, LocalDate.parse("2030-01-01"), LocalDate.parse("2030-01-01"), verifiedAt);
+
+            assertThat(driver.isEligibleToGoOnline(NOW)).isFalse();
+            assertThatThrownBy(() -> driver.goOnline(NOW)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        void aFullyVerifiedDriverIsEligible() {
+            var driver = new Driver("Nguyễn Văn A");
+            driver.recordVerification(BackgroundCheckStatus.APPROVED, LocalDate.parse("2030-01-01"), LocalDate.parse("2030-01-01"), NOW);
+
+            assertThat(driver.isEligibleToGoOnline(NOW)).isTrue();
+            driver.goOnline(NOW);
+            assertThat(driver.isOnline()).isTrue();
+        }
+
+        @Test
+        void aDriverWithRejectedBackgroundCheckIsNotEligible() {
+            var driver = new Driver("Nguyễn Văn A");
+            driver.recordVerification(BackgroundCheckStatus.REJECTED, LocalDate.parse("2030-01-01"), LocalDate.parse("2030-01-01"), NOW);
+
+            assertThat(driver.isEligibleToGoOnline(NOW)).isFalse();
+            assertThatThrownBy(() -> driver.goOnline(NOW)).isInstanceOf(IllegalStateException.class);
         }
     }
 }

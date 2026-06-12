@@ -5,9 +5,13 @@ import com.callme.common.security.AuthenticatedAccount;
 import com.callme.common.shared.GeoPoint;
 import com.callme.trip.dto.AbortInProgressTripRequest;
 import com.callme.trip.dto.ChangeDestinationRequest;
+import com.callme.trip.dto.DestinationChangeResponse;
 import com.callme.trip.dto.EmergencyAbortReportResponse;
+import com.callme.trip.dto.IncidentReportResponse;
 import com.callme.trip.dto.PickUpCustomerRequest;
+import com.callme.trip.dto.RaiseIncidentRequest;
 import com.callme.trip.dto.RaiseSosRequest;
+import com.callme.trip.dto.ResolveIncidentRequest;
 import com.callme.trip.dto.RouteDeviationFlagResponse;
 import com.callme.trip.dto.SosAlertResponse;
 import com.callme.trip.dto.TripResponse;
@@ -84,7 +88,9 @@ public class TripController {
         return ApiResponse.ok(null);
     }
 
+    /** Only the assigned driver may complete — the service enforces assignment; the role gate here keeps the endpoint consistent with every other driver action. */
     @PutMapping("/{tripId}/complete")
+    @PreAuthorize("hasRole('DRIVER')")
     public ApiResponse<Void> complete(@PathVariable UUID tripId, @AuthenticationPrincipal AuthenticatedAccount account) {
         tripService.complete(tripId, account);
         return ApiResponse.ok(null);
@@ -107,15 +113,16 @@ public class TripController {
     /**
      * CLAUDE.md C.5 — customer redirects the trip mid-route. Only the riding
      * customer may do this, and only once the driver actually has the wheel
-     * (IN_PROGRESS) — see {@link TripService#changeDestination}.
+     * (IN_PROGRESS) — see {@link TripService#changeDestination}. Returns the
+     * re-quoted fare so the new price is in the customer's hands immediately
+     * (CLAUDE.md A.4); both parties also get an in-app notification.
      */
     @PutMapping("/{tripId}/destination")
     @PreAuthorize("hasRole('CUSTOMER')")
-    public ApiResponse<Void> changeDestination(@PathVariable UUID tripId,
+    public ApiResponse<DestinationChangeResponse> changeDestination(@PathVariable UUID tripId,
                                                 @Valid @RequestBody ChangeDestinationRequest request,
                                                 @AuthenticationPrincipal AuthenticatedAccount account) {
-        tripService.changeDestination(tripId, account, new GeoPoint(request.latitude(), request.longitude()));
-        return ApiResponse.ok(null);
+        return ApiResponse.ok(tripService.changeDestination(tripId, account, new GeoPoint(request.latitude(), request.longitude())));
     }
 
     /**
@@ -185,5 +192,34 @@ public class TripController {
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<List<RouteDeviationFlagResponse>> listRouteDeviationFlags(@AuthenticationPrincipal AuthenticatedAccount account) {
         return ApiResponse.ok(tripService.listRouteDeviationFlags(account));
+    }
+
+    /**
+     * CLAUDE.md §4.2 — either participant reports a collision/incident involving the
+     * customer's vehicle. Queues the report for CSKH's liability investigation.
+     */
+    @PostMapping("/{tripId}/incidents")
+    public ApiResponse<Void> reportIncident(@PathVariable UUID tripId,
+                                             @Valid @RequestBody RaiseIncidentRequest request,
+                                             @AuthenticationPrincipal AuthenticatedAccount account) {
+        tripService.reportIncident(tripId, account, request.description());
+        return ApiResponse.ok(null);
+    }
+
+    /** CSKH/admin worklist of reported incidents — CLAUDE.md §4.2. */
+    @GetMapping("/incidents")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<List<IncidentReportResponse>> listIncidentReports(@AuthenticationPrincipal AuthenticatedAccount account) {
+        return ApiResponse.ok(tripService.listIncidentReports(account));
+    }
+
+    /** CSKH records the liability finding for a reported incident — CLAUDE.md §4.2. */
+    @PutMapping("/incidents/{incidentId}/resolve")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> resolveIncident(@PathVariable UUID incidentId,
+                                              @Valid @RequestBody ResolveIncidentRequest request,
+                                              @AuthenticationPrincipal AuthenticatedAccount account) {
+        tripService.resolveIncident(incidentId, account, request.status(), request.resolutionNote());
+        return ApiResponse.ok(null);
     }
 }

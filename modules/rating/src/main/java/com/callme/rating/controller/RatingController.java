@@ -44,9 +44,10 @@ public class RatingController {
         return ApiResponse.ok(null);
     }
 
+    /** Participant-only (or admin) — mirrors every other per-trip read in the system (OWASP A01). */
     @GetMapping("/by-trip/{tripId}")
-    public ApiResponse<List<RatingResponse>> getByTrip(@PathVariable UUID tripId) {
-        return ApiResponse.ok(ratingService.getByTrip(tripId));
+    public ApiResponse<List<RatingResponse>> getByTrip(@PathVariable UUID tripId, @AuthenticationPrincipal AuthenticatedAccount account) {
+        return ApiResponse.ok(ratingService.getByTrip(tripId, account));
     }
 
     /** CLAUDE.md F.1 — CSKH/admin queue of safety/behaviour complaints, separate from the ordinary rating feed. */

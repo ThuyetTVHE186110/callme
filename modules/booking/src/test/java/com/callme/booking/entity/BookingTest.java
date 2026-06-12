@@ -23,7 +23,7 @@ class BookingTest {
     private Booking newBooking() {
         return new Booking(UUID.randomUUID(),
                 10.0, 106.0, 10.05, 106.05,
-                BigDecimal.valueOf(100_000), "VND", "idem-key-1");
+                BigDecimal.valueOf(100_000), "VND", "idem-key-1", null, T0);
     }
 
     @Test
@@ -105,6 +105,42 @@ class BookingTest {
         }
     }
 
+    /** CLAUDE.md A.6/flow 9→12 — a finished ride settles the booking; without COMPLETED the customer would be locked out of booking ever again. */
+    @Nested
+    class Completion {
+
+        @Test
+        void aConfirmedBookingCompletesWhenItsTripDoes() {
+            var booking = newBooking();
+            booking.confirmWithDriver(UUID.randomUUID(), T0);
+
+            booking.complete();
+
+            assertThat(booking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
+        }
+
+        @Test
+        void cannotCompleteABookingThatWasNeverConfirmed() {
+            var booking = newBooking();
+
+            assertThatThrownBy(booking::complete)
+                    .isInstanceOf(IllegalStateException.class);
+        }
+
+        /** The ride happened — "cancelling" it after the fact would overwrite the completed outcome and could charge a bogus E.1 fee. */
+        @Test
+        void cannotCancelACompletedBooking() {
+            var booking = newBooking();
+            booking.confirmWithDriver(UUID.randomUUID(), T0);
+            booking.complete();
+
+            assertThatThrownBy(() -> booking.cancel(CancellationReason.CUSTOMER_REQUEST, T0.plus(Booking.CANCELLATION_GRACE_PERIOD).plusSeconds(1)))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(booking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
+            assertThat(booking.getCancellationFeeAmount()).isNull();
+        }
+    }
+
     /** CLAUDE.md E.1 — "khách hủy sau khi tài xế đã xác nhận và đang di chuyển đến điểm đón nên có phí hủy, nhưng cần ngưỡng thời gian hợp lý". */
     @Nested
     class CancellationFee {
@@ -150,6 +186,60 @@ class BookingTest {
             booking.cancel(CancellationReason.DRIVER_REQUEST, T0.plus(Booking.CANCELLATION_GRACE_PERIOD).plusSeconds(1));
 
             assertThat(booking.getCancellationFeeAmount()).isNull();
+        }
+    }
+
+    /** CLAUDE.md §4.7 — "đặt lịch trước, giới hạn trong cửa sổ ngắn (tối đa 24-48 giờ)". */
+    @Nested
+    class AdvanceBooking {
+
+        private Booking newBooking(Instant scheduledAt) {
+            return new Booking(UUID.randomUUID(),
+                    10.0, 106.0, 10.05, 106.05,
+                    BigDecimal.valueOf(100_000), "VND", "idem-key-1", scheduledAt, T0);
+        }
+
+        @Test
+        void anImmediateBookingIsAlwaysDueForMatching() {
+            var booking = newBooking(null);
+            assertThat(booking.isDueForMatching(T0)).isTrue();
+        }
+
+        @Test
+        void rejectsAScheduledTimeInThePast() {
+            assertThatThrownBy(() -> newBooking(T0.minusSeconds(1)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void rejectsAScheduledTimeAtOrBeforeNow() {
+            assertThatThrownBy(() -> newBooking(T0))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void rejectsAScheduledTimeBeyondTheAdvanceWindow() {
+            var tooFar = T0.plus(Booking.MAX_ADVANCE_BOOKING_WINDOW).plusSeconds(1);
+            assertThatThrownBy(() -> newBooking(tooFar))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void acceptsAScheduledTimeWithinTheAdvanceWindow() {
+            var booking = newBooking(T0.plus(Booking.MAX_ADVANCE_BOOKING_WINDOW));
+            assertThat(booking.getScheduledAt()).isEqualTo(T0.plus(Booking.MAX_ADVANCE_BOOKING_WINDOW));
+        }
+
+        @Test
+        void aFarOutScheduledBookingIsNotYetDueForMatching() {
+            var booking = newBooking(T0.plus(Booking.SCHEDULED_MATCH_LEAD_TIME).plusSeconds(1));
+            assertThat(booking.isDueForMatching(T0)).isFalse();
+        }
+
+        @Test
+        void aScheduledBookingWithinTheLeadTimeIsDueForMatching() {
+            var booking = newBooking(T0.plus(Booking.SCHEDULED_MATCH_LEAD_TIME));
+            assertThat(booking.isDueForMatching(T0)).isTrue();
         }
     }
 }

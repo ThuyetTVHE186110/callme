@@ -3,10 +3,13 @@ package com.callme.trip.service.impl;
 import com.callme.common.event.DriverCancelledBeforePickupEvent;
 import com.callme.common.event.DriverUnresponsiveEvent;
 import com.callme.common.event.GpsSignalLostEvent;
+import com.callme.common.event.IncidentReportedEvent;
 import com.callme.common.event.SosRaisedEvent;
 import com.callme.common.event.TripAbortedMidwayEvent;
 import com.callme.common.event.TripCancelledEvent;
 import com.callme.common.event.TripCompletedEvent;
+import com.callme.common.event.TripDestinationChangedEvent;
+import com.callme.common.exception.ConflictException;
 import com.callme.common.exception.ForbiddenException;
 import com.callme.common.exception.NotFoundException;
 import com.callme.common.port.DriverLocationFreshnessPort;
@@ -16,16 +19,21 @@ import com.callme.common.security.AuthenticatedAccount;
 import com.callme.common.shared.CancellationReason;
 import com.callme.common.shared.GeoPoint;
 import com.callme.common.shared.Money;
+import com.callme.trip.dto.DestinationChangeResponse;
 import com.callme.trip.dto.EmergencyAbortReportResponse;
+import com.callme.trip.dto.IncidentReportResponse;
 import com.callme.trip.dto.RouteDeviationFlagResponse;
 import com.callme.trip.dto.SosAlertResponse;
 import com.callme.trip.dto.TripResponse;
 import com.callme.trip.entity.EmergencyAbortReport;
+import com.callme.trip.entity.IncidentInvestigationStatus;
+import com.callme.trip.entity.IncidentReport;
 import com.callme.trip.entity.RouteDeviationFlag;
 import com.callme.trip.entity.SosAlert;
 import com.callme.trip.entity.Trip;
 import com.callme.trip.entity.TripStatus;
 import com.callme.trip.repository.EmergencyAbortReportRepository;
+import com.callme.trip.repository.IncidentReportRepository;
 import com.callme.trip.repository.RouteDeviationFlagRepository;
 import com.callme.trip.repository.SosAlertRepository;
 import com.callme.trip.repository.TripRepository;
@@ -68,8 +76,31 @@ public class TripServiceImpl implements TripService {
     /** CLAUDE.md C.7 — beyond this age mid-trip, the driver's GPS trail is considered lost (safety-relevant: they're physically holding the customer's car). */
     private static final Duration GPS_LOSS_THRESHOLD = Duration.ofMinutes(3);
 
-    /** Must match the {@code @Scheduled} cadence of {@link #sweepStaleGpsTrips} — defines the "just crossed the threshold" detection window so the alert fires exactly once, not every cycle. */
+    /**
+     * Fallback width of the "just crossed the threshold" window for the very first
+     * {@link #sweepStaleGpsTrips} run after startup, when there is no previous sweep
+     * to anchor on. Subsequent cycles anchor on the actual previous sweep time
+     * ({@link #lastGpsSweepStaleSince}) instead of assuming the nominal cadence —
+     * a sweep delayed past its schedule (shared scheduler thread, long cycle, GC)
+     * would otherwise let a stale timestamp age straight over a fixed-width window
+     * and the safety alert would silently never fire.
+     */
     private static final Duration GPS_SWEEP_INTERVAL = Duration.ofMinutes(1);
+
+    /**
+     * The {@code staleSince} mark of the previous {@link #sweepStaleGpsTrips} run —
+     * lower bound of the next run's detection window, so consecutive windows tile the
+     * timeline with no gaps regardless of how late a cycle fires. Single-writer:
+     * {@code @Scheduled} never runs the same method concurrently. Per-instance state:
+     * across restarts (or when the advisory lock alternates between instances) windows
+     * may overlap and a loss episode can alert twice — a duplicate safety heads-up is
+     * the deliberately chosen failure mode, a silently missed one is not.
+     */
+    private Instant lastGpsSweepStaleSince;
+
+    /** CLAUDE.md G — advisory-lock keys for the trip module's sweeps (multi-instance double-fire guard); arbitrary but unique across the app. */
+    private static final long UNRESPONSIVE_SWEEP_LOCK_KEY = 1001L;
+    private static final long GPS_SWEEP_LOCK_KEY = 1002L;
 
     /**
      * CLAUDE.md C.8 — how much longer the GPS-traced route may run than the
@@ -91,6 +122,7 @@ public class TripServiceImpl implements TripService {
     private final SosAlertRepository sosAlertRepository;
     private final RouteDeviationFlagRepository routeDeviationFlagRepository;
     private final EmergencyAbortReportRepository emergencyAbortReportRepository;
+    private final IncidentReportRepository incidentReportRepository;
     private final FareEstimationPort fareEstimationPort;
     private final DriverLocationFreshnessPort driverLocationFreshnessPort;
     private final DriverRouteTracePort driverRouteTracePort;
@@ -99,6 +131,7 @@ public class TripServiceImpl implements TripService {
     public TripServiceImpl(TripRepository tripRepository, SosAlertRepository sosAlertRepository,
                            RouteDeviationFlagRepository routeDeviationFlagRepository,
                            EmergencyAbortReportRepository emergencyAbortReportRepository,
+                           IncidentReportRepository incidentReportRepository,
                            FareEstimationPort fareEstimationPort, DriverLocationFreshnessPort driverLocationFreshnessPort,
                            DriverRouteTracePort driverRouteTracePort,
                            ApplicationEventPublisher events) {
@@ -106,6 +139,7 @@ public class TripServiceImpl implements TripService {
         this.sosAlertRepository = sosAlertRepository;
         this.routeDeviationFlagRepository = routeDeviationFlagRepository;
         this.emergencyAbortReportRepository = emergencyAbortReportRepository;
+        this.incidentReportRepository = incidentReportRepository;
         this.fareEstimationPort = fareEstimationPort;
         this.driverLocationFreshnessPort = driverLocationFreshnessPort;
         this.driverRouteTracePort = driverRouteTracePort;
@@ -176,7 +210,7 @@ public class TripServiceImpl implements TripService {
         trip.cancelNoShow(Instant.now(), NO_SHOW_GRACE_PERIOD);
         tripRepository.save(trip);
         log.info("Trip {} cancelled as customer no-show by driver {} after grace period", trip.getId(), trip.getDriverId());
-        events.publishEvent(new TripCancelledEvent(trip.getId(), trip.getBookingId(), trip.getDriverId()));
+        events.publishEvent(new TripCancelledEvent(trip.getId(), trip.getBookingId(), trip.getDriverId(), trip.getCancellationReason()));
     }
 
     /**
@@ -194,8 +228,9 @@ public class TripServiceImpl implements TripService {
         var destination = new GeoPoint(trip.getDestinationLatitude(), trip.getDestinationLongitude());
         var now = Instant.now();
         // CLAUDE.md §4.4 — charge at completion time: a trip that ran past midnight
-        // is billed the night surcharge that actually applied while it was happening.
-        var quote = fareEstimationPort.estimate(pickup, destination, now);
+        // is billed the night surcharge that actually applied while it was happening,
+        // and "phí chờ khách" reflects how long the driver actually waited at pickup.
+        var quote = fareEstimationPort.estimate(pickup, destination, now, waitingTime(trip));
         Money finalFare = quote.amount();
 
         trip.complete(finalFare.amount(), finalFare.currency().getCurrencyCode());
@@ -204,6 +239,21 @@ public class TripServiceImpl implements TripService {
         checkRouteDeviation(trip, quote.distanceKm(), now);
 
         events.publishEvent(new TripCompletedEvent(trip.getId(), trip.getBookingId(), trip.getCustomerId(), trip.getDriverId(), finalFare));
+    }
+
+    /**
+     * CLAUDE.md §4.4 — "phí chờ khách": how long the driver waited at the pickup
+     * point ({@link Trip#getArrivedAtPickupAt()}) before taking the wheel
+     * ({@link Trip#getIdentityVerifiedAt()}). Either timestamp can be null on a trip
+     * that skipped/short-circuited the normal lifecycle (e.g. an admin force-majeure
+     * cancellation never reached {@code IN_PROGRESS}) — {@link Duration#ZERO} in that
+     * case, since "no recorded wait" must never be billed as a wait.
+     */
+    private Duration waitingTime(Trip trip) {
+        if (trip.getArrivedAtPickupAt() == null || trip.getIdentityVerifiedAt() == null) {
+            return Duration.ZERO;
+        }
+        return Duration.between(trip.getArrivedAtPickupAt(), trip.getIdentityVerifiedAt());
     }
 
     /**
@@ -261,7 +311,7 @@ public class TripServiceImpl implements TripService {
      * `location` module — is the dispute-resolution evidence trail CLAUDE.md calls for.
      */
     @Override
-    public void changeDestination(UUID tripId, AuthenticatedAccount requester, GeoPoint newDestination) {
+    public DestinationChangeResponse changeDestination(UUID tripId, AuthenticatedAccount requester, GeoPoint newDestination) {
         var trip = findOrThrow(tripId);
         if (!requester.ownsProfile(trip.getCustomerId())) {
             throw new ForbiddenException("Chỉ khách hàng của chuyến đi mới có thể đổi điểm đến");
@@ -271,48 +321,66 @@ public class TripServiceImpl implements TripService {
         tripRepository.save(trip);
 
         var pickup = new GeoPoint(trip.getPickupLatitude(), trip.getPickupLongitude());
-        var requote = fareEstimationPort.estimate(pickup, newDestination, Instant.now());
+        var requote = fareEstimationPort.estimate(pickup, newDestination, Instant.now(), waitingTime(trip));
         log.info("Trip {} destination changed by customer {}: ({}, {}) -> ({}, {}); re-quoted fare {}",
                 trip.getId(), trip.getCustomerId(),
                 previous.latitude(), previous.longitude(),
                 newDestination.latitude(), newDestination.longitude(),
                 requote.amount());
+
+        // CLAUDE.md A.4 — "publish lại quote mới ngay khi khách đổi điểm đến": the
+        // quote must reach people, not just the log. The customer gets it in this
+        // response; the notification fan-out tells both parties (the driver is mid-job
+        // and deserves the same route/money transparency).
+        events.publishEvent(new TripDestinationChangedEvent(trip.getId(), trip.getCustomerId(), trip.getDriverId(),
+                newDestination, requote.amount()));
+        return new DestinationChangeResponse(requote.amount().amount(),
+                requote.amount().currency().getCurrencyCode(), requote.distanceKm());
     }
 
     /**
      * Either participant (customer or driver) may request cancellation; admins can
-     * force it for dispute resolution. CLAUDE.md E.2 — the one carve-out: the assigned
-     * driver may NOT use this to back out of an IN_PROGRESS trip. They are physically
-     * holding the customer's car with the customer aboard; "bỏ chuyến" mid-route the
-     * same way they'd cancel any other booking is exactly the casual escape hatch
-     * CLAUDE.md warns must not exist. {@link #abortInProgressTrip} — which requires
-     * first attesting the car and customer are already at a declared safe location —
-     * is the only legitimate door out of that state for the driver.
+     * force it for dispute resolution (recorded as FORCE_MAJEURE — CLAUDE.md E.3, the
+     * one lane "bất khả kháng" enters the record without inviting self-declared abuse).
+     *
+     * CLAUDE.md E.2 — once the trip is IN_PROGRESS, neither participant gets a casual
+     * exit. The assigned driver is physically holding the customer's car with the
+     * customer aboard; their only legitimate door is {@link #abortInProgressTrip},
+     * which requires attesting the car and customer are already at a declared safe
+     * location. The customer ending the ride early must go through
+     * {@link #changeDestination} + driver {@link #complete} so the distance already
+     * driven is actually charged — letting them "cancel" mid-route would erase the
+     * entire fare (no TripCompletedEvent → no Payment), i.e. ride 19 of 20 km and
+     * walk away free.
+     *
+     * A driver cancelling pre-pickup is funnelled through {@link #driverCancelBeforePickup}
+     * (CLAUDE.md B.4): the customer's request must survive and be re-dispatched, never
+     * silently killed by an "ordinary" cancel.
      */
     @Override
     public void cancel(UUID tripId, AuthenticatedAccount requester) {
         var trip = findOrThrow(tripId);
         requireParticipant(trip, requester);
-        if (trip.getStatus() == TripStatus.IN_PROGRESS && requester.ownsProfile(trip.getDriverId())) {
-            throw new ForbiddenException(
-                    "Tài xế không thể huỷ khi đang cầm lái xe của khách — phải đưa xe và khách đến nơi an toàn trước, qua quy trình báo cáo khẩn cấp giữa chuyến: chuyến đi " + trip.getId());
-        }
-        cancelAndPublish(trip, classifyCancellation(trip, requester));
-    }
 
-    /**
-     * CLAUDE.md E.3 — classify by who actually requested the cancellation: the
-     * customer or the driver bears CUSTOMER_REQUEST/DRIVER_REQUEST respectively
-     * (a later fee policy may charge the requesting party); CSKH/admin only ever
-     * intervenes here for a reported exceptional circumstance — accident, medical
-     * emergency, natural disaster — so an admin-initiated cancel is the one lane
-     * "bất khả kháng" enters the record without inviting self-declared abuse.
-     */
-    private CancellationReason classifyCancellation(Trip trip, AuthenticatedAccount requester) {
         if (requester.isAdmin()) {
-            return CancellationReason.FORCE_MAJEURE;
+            cancelAndPublish(trip, CancellationReason.FORCE_MAJEURE);
+            return;
         }
-        return requester.ownsProfile(trip.getDriverId()) ? CancellationReason.DRIVER_REQUEST : CancellationReason.CUSTOMER_REQUEST;
+
+        if (requester.ownsProfile(trip.getDriverId())) {
+            if (trip.getStatus() == TripStatus.IN_PROGRESS) {
+                throw new ForbiddenException(
+                        "Tài xế không thể huỷ khi đang cầm lái xe của khách — phải đưa xe và khách đến nơi an toàn trước, qua quy trình báo cáo khẩn cấp giữa chuyến: chuyến đi " + trip.getId());
+            }
+            driverCancelBeforePickup(tripId, requester);
+            return;
+        }
+
+        if (trip.getStatus() == TripStatus.IN_PROGRESS) {
+            throw new ForbiddenException(
+                    "Không thể huỷ khi tài xế đang cầm lái xe của bạn — muốn kết thúc sớm, hãy đổi điểm đến về vị trí hiện tại để tài xế hoàn tất chuyến và tính cước phần đã đi: chuyến đi " + trip.getId());
+        }
+        cancelAndPublish(trip, CancellationReason.CUSTOMER_REQUEST);
     }
 
     /** Trip statuses in which the driver has not yet taken the wheel — backing out is still "before pickup", however far along the approach was. */
@@ -397,14 +465,28 @@ public class TripServiceImpl implements TripService {
      * Silently no-ops when there's nothing to do: no trip yet, or it already reached
      * a terminal state (e.g. the driver completed it moments before this arrived) —
      * {@link Trip#cancel} would otherwise throw IllegalStateException on a race like that.
+     *
+     * CLAUDE.md E.2/D — a customer-initiated booking cancellation must not cascade
+     * into an IN_PROGRESS trip: {@link #cancel} already refuses the customer that
+     * exit (it erases the whole fare), so the booking door has to refuse it too or
+     * the loophole just moves one API over. Throwing here rolls the booking's own
+     * cancellation back atomically (same transaction — CLAUDE.md G.1). Admin-initiated
+     * (FORCE_MAJEURE) cascades stay allowed from any non-terminal status.
      */
     @Override
-    public void cancelForBooking(UUID bookingId) {
+    public void cancelForBooking(UUID bookingId, CancellationReason bookingCancellationReason) {
         tripRepository.findFirstByBookingIdAndStatusInOrderByIdDesc(bookingId, ACTIVE_TRIP_STATUSES)
-                // CLAUDE.md E.3 — this trip didn't end because either participant chose to end
-                // it; it's a side effect of its booking ending. Neither side should be charged
-                // a cancellation fee for a consequence outside their control.
-                .ifPresent(trip -> cancelAndPublish(trip, CancellationReason.SYSTEM_CASCADE));
+                .ifPresent(trip -> {
+                    if (trip.getStatus() == TripStatus.IN_PROGRESS
+                            && bookingCancellationReason == CancellationReason.CUSTOMER_REQUEST) {
+                        throw new ConflictException(
+                                "Không thể huỷ booking khi tài xế đang cầm lái xe của bạn — muốn kết thúc sớm, hãy đổi điểm đến về vị trí hiện tại để tài xế hoàn tất chuyến và tính cước phần đã đi: chuyến đi " + trip.getId());
+                    }
+                    // CLAUDE.md E.3 — this trip didn't end because either participant chose to end
+                    // it; it's a side effect of its booking ending. Neither side should be charged
+                    // a cancellation fee for a consequence outside their control.
+                    cancelAndPublish(trip, CancellationReason.SYSTEM_CASCADE);
+                });
     }
 
     /**
@@ -417,16 +499,31 @@ public class TripServiceImpl implements TripService {
      */
     @Scheduled(fixedDelayString = "PT1M")
     void sweepUnresponsiveDrivers() {
+        if (!tripRepository.tryAdvisoryXactLock(UNRESPONSIVE_SWEEP_LOCK_KEY)) {
+            return; // another instance is running this sweep right now (CLAUDE.md G)
+        }
         var threshold = Instant.now().minus(DRIVER_RESPONSE_TIMEOUT);
         for (var trip : tripRepository.findAllByStatusAndCreatedAtBefore(TripStatus.STARTED, threshold)) {
             UUID bookingId = trip.getBookingId();
             UUID driverId = trip.getDriverId();
             UUID tripId = trip.getId();
-            cancelAndPublish(trip, CancellationReason.DRIVER_UNRESPONSIVE);
-            log.warn("Trip {} auto-cancelled — driver {} unresponsive past {} timeout; re-dispatching booking {} and recording a strike",
-                    tripId, driverId, DRIVER_RESPONSE_TIMEOUT, bookingId);
-            events.publishEvent(new DriverCancelledBeforePickupEvent(bookingId, tripId, driverId));
-            events.publishEvent(new DriverUnresponsiveEvent(driverId, tripId));
+            // One sour trip (e.g. a concurrent transition raced this sweep and the
+            // cancel guard now refuses) must not abort the whole batch — every other
+            // stranded customer in this cycle still deserves their re-dispatch.
+            try {
+                cancelAndPublish(trip, CancellationReason.DRIVER_UNRESPONSIVE);
+                log.warn("Trip {} auto-cancelled — driver {} unresponsive past {} timeout; re-dispatching booking {} and recording a strike",
+                        tripId, driverId, DRIVER_RESPONSE_TIMEOUT, bookingId);
+                // Strike first, re-dispatch second: the re-match (triggered synchronously by
+                // DriverCancelledBeforePickupEvent) sorts candidates by noResponseStrikes, so
+                // the ghost driver must already carry this strike when other bookings in the
+                // same sweep window go looking — and the re-match for THIS booking excludes
+                // them outright (CLAUDE.md B.3/B.4).
+                events.publishEvent(new DriverUnresponsiveEvent(driverId, tripId));
+                events.publishEvent(new DriverCancelledBeforePickupEvent(bookingId, tripId, driverId));
+            } catch (RuntimeException e) {
+                log.error("Unresponsive-driver sweep failed for trip {} (booking {}) — skipping it this cycle, the next sweep retries", tripId, bookingId, e);
+            }
         }
     }
 
@@ -446,17 +543,38 @@ public class TripServiceImpl implements TripService {
      */
     @Scheduled(fixedDelayString = "PT1M")
     void sweepStaleGpsTrips() {
+        if (!tripRepository.tryAdvisoryXactLock(GPS_SWEEP_LOCK_KEY)) {
+            return; // another instance is running this sweep right now (CLAUDE.md G)
+        }
         var now = Instant.now();
         var staleSince = now.minus(GPS_LOSS_THRESHOLD);
-        var justCrossedAfter = staleSince.minus(GPS_SWEEP_INTERVAL);
+        // Anchor the window's lower bound on the PREVIOUS sweep's mark, not on an
+        // assumed nominal cadence: consecutive windows then tile the timeline with no
+        // gaps, so a cycle that fires late (busy shared scheduler thread, slow cycle)
+        // widens its own window instead of letting a stale fix age past detection.
+        var justCrossedAfter = lastGpsSweepStaleSince != null ? lastGpsSweepStaleSince : staleSince.minus(GPS_SWEEP_INTERVAL);
 
+        boolean cleanCycle = true;
         for (var trip : tripRepository.findAllByStatus(TripStatus.IN_PROGRESS)) {
-            var lastKnownAt = driverLocationFreshnessPort.lastReportedAt(trip.getDriverId()).orElse(trip.getCreatedAt());
-            if (lastKnownAt.isBefore(staleSince) && lastKnownAt.isAfter(justCrossedAfter)) {
-                log.warn("Trip {} — driver {} GPS signal lost (last seen {}, threshold {}); alerting customer, driver and support",
-                        trip.getId(), trip.getDriverId(), lastKnownAt, GPS_LOSS_THRESHOLD);
-                events.publishEvent(new GpsSignalLostEvent(trip.getId(), trip.getCustomerId(), trip.getDriverId(), lastKnownAt));
+            try {
+                var lastKnownAt = driverLocationFreshnessPort.lastReportedAt(trip.getDriverId()).orElse(trip.getCreatedAt());
+                if (lastKnownAt.isBefore(staleSince) && lastKnownAt.isAfter(justCrossedAfter)) {
+                    log.warn("Trip {} — driver {} GPS signal lost (last seen {}, threshold {}); alerting customer, driver and support",
+                            trip.getId(), trip.getDriverId(), lastKnownAt, GPS_LOSS_THRESHOLD);
+                    events.publishEvent(new GpsSignalLostEvent(trip.getId(), trip.getCustomerId(), trip.getDriverId(), lastKnownAt));
+                }
+            } catch (RuntimeException e) {
+                // This trip's freshness lookup failed — the rest of the in-progress
+                // fleet still deserves its safety check this cycle. Holding the window
+                // mark back (below) makes the next cycle re-cover this whole window, so
+                // the skipped trip gets re-checked; trips already alerted may then alert
+                // twice — duplicates are the chosen failure mode, silent misses are not.
+                cleanCycle = false;
+                log.error("GPS-loss sweep failed for trip {} — skipping it this cycle", trip.getId(), e);
             }
+        }
+        if (cleanCycle) {
+            lastGpsSweepStaleSince = staleSince;
         }
     }
 
@@ -505,10 +623,66 @@ public class TripServiceImpl implements TripService {
                 .toList();
     }
 
+    /**
+     * CLAUDE.md §4.2 — an incident can be reported once the driver has actually been
+     * with the customer's vehicle, including after the trip ended. The gate is the
+     * recorded arrival timestamp, not the status: a status list that includes
+     * CANCELLED would also admit trips cancelled straight from STARTED (driver never
+     * reached the car — there is nothing involving the customer's vehicle to report),
+     * while {@code arrivedAtPickupAt != null} states the actual business condition
+     * "the driver has physically been at the vehicle" in every lifecycle path.
+     */
+    @Override
+    public void reportIncident(UUID tripId, AuthenticatedAccount requester, String description) {
+        var trip = findOrThrow(tripId);
+        requireParticipant(trip, requester);
+        if (requester.isAdmin()) {
+            throw new ForbiddenException("Chỉ khách hàng hoặc tài xế của chuyến đi mới có thể báo cáo sự cố");
+        }
+        if (trip.getArrivedAtPickupAt() == null) {
+            throw new ForbiddenException(
+                    "Không thể báo cáo sự cố khi tài xế chưa tiếp cận xe của khách — chuyến đi " + trip.getId() + " đang ở trạng thái " + trip.getStatus());
+        }
+
+        var now = Instant.now();
+        var report = incidentReportRepository.save(new IncidentReport(
+                trip.getId(), requester.profileId(), trip.getCustomerId(), trip.getDriverId(), description, now));
+        log.warn("Incident reported on trip {} by profile {} at {}: {}", trip.getId(), requester.profileId(), now, description);
+        events.publishEvent(new IncidentReportedEvent(report.getId(), trip.getId(), requester.profileId(),
+                trip.getCustomerId(), trip.getDriverId(), now));
+    }
+
+    @Override
+    public List<IncidentReportResponse> listIncidentReports(AuthenticatedAccount requester) {
+        if (!requester.isAdmin()) {
+            throw new ForbiddenException("Chỉ quản trị viên mới có thể xem danh sách sự cố");
+        }
+        return incidentReportRepository.findAllByOrderByReportedAtDesc().stream()
+                .map(this::toIncidentResponse)
+                .toList();
+    }
+
+    @Override
+    public void resolveIncident(UUID incidentId, AuthenticatedAccount requester, IncidentInvestigationStatus status, String resolutionNote) {
+        if (!requester.isAdmin()) {
+            throw new ForbiddenException("Chỉ quản trị viên mới có thể giải quyết sự cố");
+        }
+        var report = incidentReportRepository.findById(incidentId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy sự cố: " + incidentId));
+        report.resolve(status, resolutionNote, Instant.now());
+        incidentReportRepository.save(report);
+    }
+
+    private IncidentReportResponse toIncidentResponse(IncidentReport report) {
+        return new IncidentReportResponse(report.getId(), report.getTripId(), report.getReportedByProfileId(),
+                report.getCustomerId(), report.getDriverId(), report.getDescription(), report.getInvestigationStatus(),
+                report.getReportedAt(), report.getResolutionNote(), report.getResolvedAt());
+    }
+
     private void cancelAndPublish(Trip trip, CancellationReason reason) {
         trip.cancel(reason);
         tripRepository.save(trip);
-        events.publishEvent(new TripCancelledEvent(trip.getId(), trip.getBookingId(), trip.getDriverId()));
+        events.publishEvent(new TripCancelledEvent(trip.getId(), trip.getBookingId(), trip.getDriverId(), reason));
     }
 
     private void requireAssignedDriver(Trip trip, AuthenticatedAccount requester) {

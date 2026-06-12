@@ -117,7 +117,14 @@ public class RatingServiceImpl implements RatingService {
     }
 
     @Override
-    public List<RatingResponse> getByTrip(UUID tripId) {
+    public List<RatingResponse> getByTrip(UUID tripId, AuthenticatedAccount requester) {
+        if (!requester.isAdmin()) {
+            var participants = tripParticipantsPort.findParticipants(tripId)
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy chuyến đi: " + tripId));
+            if (!requester.ownsProfile(participants.customerId()) && !requester.ownsProfile(participants.driverId())) {
+                throw new ForbiddenException("Chỉ các bên tham gia chuyến đi mới có thể xem đánh giá của chuyến này");
+            }
+        }
         return ratingRepository.findByTripId(tripId).stream()
                 .map(this::toResponse)
                 .toList();

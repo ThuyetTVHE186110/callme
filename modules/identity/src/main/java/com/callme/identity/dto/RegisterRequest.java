@@ -16,7 +16,10 @@ public record RegisterRequest(
         @NotBlank(message = "Số điện thoại không được để trống")
         @Pattern(regexp = "^[0-9+][0-9 ]{6,14}$", message = "Số điện thoại không hợp lệ") String phoneNumber,
         @NotBlank(message = "Mật khẩu không được để trống")
-        @Size(min = 6, max = 100, message = "Mật khẩu phải có ít nhất 6 ký tự") String password,
+        // OWASP A07 — 8 is the floor for accounts that gate someone's real-time
+        // location and physical vehicle; complexity rules and a breached-password
+        // check belong to the credential-lifecycle work (CLAUDE.md §4.8).
+        @Size(min = 8, max = 100, message = "Mật khẩu phải có ít nhất 8 ký tự") String password,
         @Email(message = "Email không hợp lệ") String email,
         @NotNull(message = "Vai trò không được để trống") AccountRole role) {
 }

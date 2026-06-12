@@ -27,30 +27,47 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    public UUID openForTrip(UUID tripId, UUID customerId, BigDecimal amount, String currency) {
-        return paymentRepository.save(new Payment(tripId, customerId, amount, currency)).getId();
+    public UUID openForTrip(UUID tripId, UUID customerId, UUID driverId, BigDecimal amount, String currency) {
+        return paymentRepository.save(new Payment(tripId, customerId, driverId, amount, currency)).getId();
     }
 
     @Override
     public PaymentResponse getByTrip(UUID tripId, AuthenticatedAccount requester) {
         var payment = paymentRepository.findByTripId(tripId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy thanh toán cho chuyến đi: " + tripId));
-        requireOwner(payment, requester);
+        requireParticipant(payment, requester);
         return toResponse(payment);
     }
 
+    /**
+     * CLAUDE.md D.1/§4.3 — settlement is attested by the party who actually received
+     * value: CASH by the collecting driver, IN_APP by the paying customer. A customer
+     * self-confirming CASH would leave "đã đưa tiền chưa" disputes with zero
+     * counterparty evidence — exactly what D.2 says the system must never do.
+     */
     @Override
     public void confirm(UUID paymentId, PaymentMethod method, AuthenticatedAccount requester) {
         var payment = findOrThrow(paymentId);
-        requireOwner(payment, requester);
+        if (!requester.isAdmin()) {
+            boolean allowed = switch (method) {
+                case CASH -> requester.ownsProfile(payment.getDriverId());
+                case IN_APP -> requester.ownsProfile(payment.getCustomerId());
+            };
+            if (!allowed) {
+                throw new ForbiddenException(method == PaymentMethod.CASH
+                        ? "Chỉ tài xế (người trực tiếp nhận tiền) mới có thể xác nhận thanh toán tiền mặt"
+                        : "Chỉ khách hàng mới có thể xác nhận thanh toán qua ứng dụng");
+            }
+        }
         payment.confirm(method);
         paymentRepository.save(payment);
     }
 
+    /** CLAUDE.md D.1 — the driver at the kerb (refusal/no cash) or the customer (gateway decline, D.3); both feed the same CSKH queue once retries run out. */
     @Override
     public void markFailed(UUID paymentId, AuthenticatedAccount requester) {
         var payment = findOrThrow(paymentId);
-        requireOwner(payment, requester);
+        requireParticipant(payment, requester);
         payment.markFailed();
         paymentRepository.save(payment);
     }
@@ -88,8 +105,10 @@ public class PaymentServiceImpl implements PaymentService {
                 .toList();
     }
 
-    private void requireOwner(Payment payment, AuthenticatedAccount requester) {
-        if (!requester.isAdmin() && !requester.ownsProfile(payment.getCustomerId())) {
+    private void requireParticipant(Payment payment, AuthenticatedAccount requester) {
+        if (!requester.isAdmin()
+                && !requester.ownsProfile(payment.getCustomerId())
+                && !requester.ownsProfile(payment.getDriverId())) {
             throw new ForbiddenException("Bạn không có quyền thao tác trên thanh toán này");
         }
     }
@@ -100,7 +119,7 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     private PaymentResponse toResponse(Payment payment) {
-        return new PaymentResponse(payment.getId(), payment.getTripId(), payment.getCustomerId(),
+        return new PaymentResponse(payment.getId(), payment.getTripId(), payment.getCustomerId(), payment.getDriverId(),
                 payment.getAmount(), payment.getCurrency(), payment.getMethod(), payment.getStatus());
     }
 }

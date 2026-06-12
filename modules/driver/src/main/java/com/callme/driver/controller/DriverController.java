@@ -4,7 +4,9 @@ import com.callme.common.exception.ForbiddenException;
 import com.callme.common.response.ApiResponse;
 import com.callme.common.security.AuthenticatedAccount;
 import com.callme.driver.dto.DriverResponse;
+import com.callme.driver.dto.OnlineDriverResponse;
 import com.callme.driver.dto.SetOnlineRequest;
+import com.callme.driver.dto.VerifyDriverRequest;
 import com.callme.driver.service.DriverService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,9 +31,17 @@ public class DriverController {
         this.driverService = driverService;
     }
 
+    /** Public projection (id + name) — the §4.5 verification dossier is NOT for fleet-wide harvesting by any logged-in user (OWASP A01). */
     @GetMapping("/online")
-    public ApiResponse<List<DriverResponse>> listOnline() {
+    public ApiResponse<List<OnlineDriverResponse>> listOnline() {
         return ApiResponse.ok(driverService.listOnlineDrivers());
+    }
+
+    /** Full driver record incl. verification dossier — admin verification workflow only. */
+    @GetMapping("/{driverId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<DriverResponse> get(@PathVariable UUID driverId) {
+        return ApiResponse.ok(driverService.getDriver(driverId));
     }
 
     /**
@@ -45,6 +55,17 @@ public class DriverController {
                                        @AuthenticationPrincipal AuthenticatedAccount account) {
         requireSelf(driverId, account);
         driverService.setOnline(driverId, request.online());
+        return ApiResponse.ok(null);
+    }
+
+    /**
+     * CLAUDE.md §4.5/§4.2 — admin records the outcome of a periodic reverification round
+     * (background check, license, insurance), restarting {@link com.callme.driver.entity.Driver#REVERIFICATION_INTERVAL}.
+     */
+    @PutMapping("/{driverId}/verification")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> recordVerification(@PathVariable UUID driverId, @Valid @RequestBody VerifyDriverRequest request) {
+        driverService.recordVerification(driverId, request.backgroundCheckStatus(), request.licenseExpiryDate(), request.insuranceValidUntil());
         return ApiResponse.ok(null);
     }
 

@@ -27,6 +27,6 @@ public class BookingEventListener {
 
     @EventListener
     public void onBookingCancelled(BookingCancelledEvent event) {
-        tripService.cancelForBooking(event.bookingId());
+        tripService.cancelForBooking(event.bookingId(), event.reason());
     }
 }

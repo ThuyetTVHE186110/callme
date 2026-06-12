@@ -1,0 +1,21 @@
+# OWASP A06 — automated dependency-vulnerability surfacing. Dependabot opens PRs
+# for known-CVE/outdated dependencies; CI (ci.yml) then proves each bump still
+# builds green before a human merges it.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Spring Boot manages most transitive versions via the parent BOM — bump it
+      # as one coherent PR instead of a storm of per-artifact ones.
+      spring-boot:
+        patterns:
+          - "org.springframework.boot:*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

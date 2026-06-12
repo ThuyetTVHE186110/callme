@@ -40,6 +40,21 @@ public class Booking {
     public static final BigDecimal CANCELLATION_FEE_AMOUNT = new BigDecimal("20000");
     public static final String CANCELLATION_FEE_CURRENCY = "VND";
 
+    /**
+     * CLAUDE.md §4.7 — "giới hạn trong cửa sổ ngắn (ví dụ tối đa 24-48 giờ)". Rejected
+     * outright at creation time so a stale "đặt trước" request from days ago never
+     * lingers as a PENDING booking nobody will ever match.
+     */
+    public static final Duration MAX_ADVANCE_BOOKING_WINDOW = Duration.ofHours(48);
+
+    /**
+     * CLAUDE.md §4.7 — "trì hoãn matching đến gần scheduledAt (ví dụ trước N phút)".
+     * A booking whose scheduledAt is still further out than this stays PENDING,
+     * untouched by matching, so dispatch always works off the freshest driver
+     * locations rather than locking one in a day early.
+     */
+    public static final Duration SCHEDULED_MATCH_LEAD_TIME = Duration.ofMinutes(15);
+
     @Id
     @GeneratedValue
     private UUID id;
@@ -75,6 +90,14 @@ public class Booking {
      */
     private String idempotencyKey;
 
+    /**
+     * CLAUDE.md §4.7 — "đặt lịch trước"; null means "ngay bây giờ" (the existing
+     * immediate-matching behaviour, unchanged). Non-null anchors both the
+     * {@link #MAX_ADVANCE_BOOKING_WINDOW} validation at creation time and
+     * {@link #isDueForMatching} for the dispatch sweep.
+     */
+    private Instant scheduledAt;
+
     /** CLAUDE.md E.3 — recorded at cancellation time so a later fee/dispute policy can tell who (if anyone) was at fault. Null until cancelled. */
     @Enumerated(EnumType.STRING)
     private CancellationReason cancellationReason;
@@ -103,7 +126,15 @@ public class Booking {
                    double pickupLatitude, double pickupLongitude,
                    double destinationLatitude, double destinationLongitude,
                    BigDecimal estimatedFareAmount, String estimatedFareCurrency,
-                   String idempotencyKey) {
+                   String idempotencyKey, Instant scheduledAt, Instant now) {
+        if (scheduledAt != null) {
+            if (!scheduledAt.isAfter(now)) {
+                throw new IllegalArgumentException("Thời điểm đặt lịch trước phải ở tương lai: " + scheduledAt);
+            }
+            if (scheduledAt.isAfter(now.plus(MAX_ADVANCE_BOOKING_WINDOW))) {
+                throw new IllegalArgumentException("Chỉ có thể đặt lịch trước tối đa " + MAX_ADVANCE_BOOKING_WINDOW.toHours() + " giờ");
+            }
+        }
         this.customerId = customerId;
         this.pickupLatitude = pickupLatitude;
         this.pickupLongitude = pickupLongitude;
@@ -112,7 +143,18 @@ public class Booking {
         this.estimatedFareAmount = estimatedFareAmount;
         this.estimatedFareCurrency = estimatedFareCurrency;
         this.idempotencyKey = idempotencyKey;
+        this.scheduledAt = scheduledAt;
         this.status = BookingStatus.PENDING;
+    }
+
+    /**
+     * CLAUDE.md §4.7 — true for every immediate booking ({@code scheduledAt == null}),
+     * and for an advance booking once it's within {@link #SCHEDULED_MATCH_LEAD_TIME}
+     * of its scheduled time (or already past it). False means dispatch should leave
+     * this booking alone for now — the scheduled-booking sweep will revisit it later.
+     */
+    public boolean isDueForMatching(Instant now) {
+        return scheduledAt == null || !scheduledAt.isAfter(now.plus(SCHEDULED_MATCH_LEAD_TIME));
     }
 
     public void confirmWithDriver(UUID driverId, Instant now) {
@@ -138,6 +180,18 @@ public class Booking {
     }
 
     /**
+     * The trip for this booking reached COMPLETED — the ride happened, the request is
+     * settled. Only legal from CONFIRMED (a trip only ever exists for a confirmed
+     * booking); guards against double-fire from a replayed event.
+     */
+    public void complete() {
+        if (this.status != BookingStatus.CONFIRMED) {
+            throw new IllegalStateException("Cannot complete booking " + this.id + " from status " + this.status + " (expected CONFIRMED)");
+        }
+        this.status = BookingStatus.COMPLETED;
+    }
+
+    /**
      * Customer-initiated cancellation (CLAUDE.md edge case E.1). Once a trip has
      * actually started the driver is holding the customer's car — cancellation at
      * that point is the trip module's concern (handle-with-care flow), not booking's.
@@ -145,6 +199,12 @@ public class Booking {
     public void cancel(CancellationReason reason, Instant now) {
         if (this.status == BookingStatus.CANCELLED) {
             throw new IllegalStateException("Booking already cancelled: " + this.id);
+        }
+        if (this.status == BookingStatus.COMPLETED) {
+            // The ride already happened — "cancelling" it now would overwrite the
+            // completed outcome (and could charge a bogus E.1 fee) on the very record
+            // CSKH relies on for fare disputes (CLAUDE.md D.2).
+            throw new IllegalStateException("Cannot cancel a completed booking: " + this.id);
         }
         // CLAUDE.md E.1 — a fee only ever applies to a customer backing out of a ride
         // a driver is already travelling toward, and only past the grace period: a

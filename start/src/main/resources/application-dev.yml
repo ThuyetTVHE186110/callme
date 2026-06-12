@@ -19,8 +19,12 @@ spring:
       # just keeps Hibernate honest against what the migrations actually produced,
       # so a mismatch surfaces at boot time here in dev, not as a surprise in prod.
       ddl-auto: validate
+    # Echo SQL while developing — deliberately a dev-only opt-in, never a base
+    # default that could leak into prod logs (OWASP A05/A09).
+    show-sql: true
     properties:
       hibernate:
+        format_sql: true
         jdbc:
           # Windows reports the JVM timezone as "Asia/Saigon" (legacy alias) which
           # PostgreSQL rejects. Pinning Hibernate's JDBC layer to UTC sidesteps the
@@ -31,3 +35,10 @@ app:
   cors:
     # Common local dev ports for a web admin console (CRA/Vite/Next defaults).
     allowed-origins: http://localhost:3000,http://localhost:5173
+  sms:
+    # CLAUDE.md §4.8 — the logging fake (also the default when unset): OTP codes go
+    # to the app log instead of a real SMS, so register/verify is testable locally.
+    # To fire a REAL SMS from a dev box (e.g. burning the SpeedSMS free credit to
+    # verify the integration end-to-end): set SMS_PROVIDER=speedsms and
+    # SPEEDSMS_ACCESS_TOKEN in the environment — never in this file.
+    provider: ${SMS_PROVIDER:logging}

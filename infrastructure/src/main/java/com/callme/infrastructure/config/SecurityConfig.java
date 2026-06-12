@@ -1,5 +1,6 @@
 package com.callme.infrastructure.config;
 
+import com.callme.common.port.AccountStatusPort;
 import com.callme.common.response.ApiResponse;
 import com.callme.infrastructure.security.JwtAuthenticationFilter;
 import com.callme.infrastructure.security.JwtTokenProvider;
@@ -76,7 +77,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtTokenProvider tokenProvider, ObjectMapper objectMapper,
-                                                    CorsConfigurationSource corsConfigurationSource) throws Exception {
+                                                    CorsConfigurationSource corsConfigurationSource,
+                                                    AccountStatusPort accountStatusPort) throws Exception {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.disable())
@@ -98,7 +100,7 @@ public class SecurityConfig {
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint((request, response, ex) -> writeJsonError(response, objectMapper, 401, "Authentication required"))
                         .accessDeniedHandler((request, response, ex) -> writeJsonError(response, objectMapper, 403, "Access denied")))
-                .addFilterBefore(new JwtAuthenticationFilter(tokenProvider), UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new JwtAuthenticationFilter(tokenProvider, accountStatusPort), UsernamePasswordAuthenticationFilter.class)
                 // Runs first (outermost) so the id is in MDC — and on the response —
                 // for the entire request, including auth failures the JWT filter itself raises.
                 .addFilterBefore(new CorrelationIdFilter(), JwtAuthenticationFilter.class)

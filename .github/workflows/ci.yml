@@ -6,9 +6,9 @@ name: CI
 # dialect-specific issues (timezone handling, check constraints, etc.) that an
 # in-memory substitute would hide. Mirrors the local verification loop documented
 # in CLAUDE.md (spin up `postgres:16-alpine`, point the reactor at it, tear down).
+# PR-only: pushes to master are tested by the CD workflow (cd.yml) as the first
+# gate of its deploy chain — running this one there too would just double the bill.
 on:
-  push:
-    branches: [main, master]
   pull_request:
     branches: [main, master]
 

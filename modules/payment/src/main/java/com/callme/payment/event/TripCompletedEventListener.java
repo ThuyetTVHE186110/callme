@@ -20,7 +20,7 @@ public class TripCompletedEventListener {
 
     @EventListener
     public void onTripCompleted(TripCompletedEvent event) {
-        paymentService.openForTrip(event.tripId(), event.customerId(),
+        paymentService.openForTrip(event.tripId(), event.customerId(), event.driverId(),
                 event.finalFare().amount(), event.finalFare().currency().getCurrencyCode());
     }
 }

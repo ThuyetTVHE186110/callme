@@ -3,6 +3,8 @@ package com.callme.trip.repository;
 import com.callme.trip.entity.Trip;
 import com.callme.trip.entity.TripStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -30,4 +32,15 @@ public interface TripRepository extends JpaRepository<Trip, UUID> {
 
     /** Returns the most recent trip for a booking regardless of status — used by the by-booking lookup endpoint. */
     Optional<Trip> findFirstByBookingIdOrderByIdDesc(UUID bookingId);
+
+    /**
+     * CLAUDE.md G — Postgres transaction-scoped advisory lock guarding the periodic
+     * sweeps against double-firing when more than one app instance runs. Non-blocking:
+     * {@code false} means another instance holds this sweep's lock right now, so this
+     * cycle simply skips (the work is idempotent-per-cycle, the next cycle retries).
+     * Transaction-scoped ({@code _xact_}) so the lock can never leak — it releases
+     * with the sweep's own commit/rollback, with no unlock bookkeeping to forget.
+     */
+    @Query(value = "select pg_try_advisory_xact_lock(:key)", nativeQuery = true)
+    boolean tryAdvisoryXactLock(@Param("key") long key);
 }

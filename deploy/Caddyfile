@@ -1,0 +1,25 @@
+# Public edge for the CallMe API (CLAUDE.md G.7). Caddy handles TLS automatically
+# (Let's Encrypt issuance + renewal for {$DOMAIN}) and redirects HTTP -> HTTPS by
+# default — a bearer-token API over plain HTTP is an instant credential leak.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# An API serves no HTML; framing it is never legitimate.
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# SecurityConfig permits /actuator/** on the assumption that "the ingress never
+	# routes public traffic to it" — this is that assumption, enforced. Health checks
+	# run from inside the Docker network; Prometheus scrapes the same way.
+	@internal path /actuator/*
+	respond @internal 404
+
+	# Caddy sets X-Forwarded-For/-Proto; the app's Tomcat RemoteIpValve trusts them
+	# because the container address falls in Boot's default internal-proxies ranges —
+	# this is what keeps the per-IP login rate limit per-CLIENT, not per-LB.
+	reverse_proxy app:8080
+}

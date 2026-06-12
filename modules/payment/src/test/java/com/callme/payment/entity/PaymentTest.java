@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PaymentTest {
 
     private Payment newPayment() {
-        return new Payment(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.valueOf(150_000), "VND");
+        return new Payment(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), BigDecimal.valueOf(150_000), "VND");
     }
 
     @Test
