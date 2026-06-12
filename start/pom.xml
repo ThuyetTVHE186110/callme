@@ -113,7 +113,7 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.8.5</version>
+            <version>3.0.3</version>
         </dependency>
         <!-- JSON log encoder for prod — turns each log line into a structured record
              (timestamp, level, logger, MDC fields, stack trace as a real field) that
