@@ -22,10 +22,18 @@ echo "==> [2/8] Deploy user (sudo, docker; SSH key inherited from root)"
 if ! id "$DEPLOY_USER" &>/dev/null; then
     adduser --disabled-password --gecos "" "$DEPLOY_USER"
     usermod -aG sudo "$DEPLOY_USER"
-    # Passwordless sudo for service management only — not blanket root.
-    echo "$DEPLOY_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/sbin/reboot" > /etc/sudoers.d/deploy
-    chmod 440 /etc/sudoers.d/deploy
 fi
+# Full passwordless sudo — a deliberate, honest choice, not an oversight:
+# (1) the user has NO password (--disabled-password above), so any sudo rule that
+#     would prompt can never succeed — a narrower whitelist here once locked the
+#     operator out of `sudo ufw status` entirely;
+# (2) deploy must be in the `docker` group for the CD pipeline, and docker-group
+#     membership is already root-equivalent (mount / into a container) — a narrow
+#     sudoers list would be security theater on this box. The real boundary is
+#     key-only SSH + no root login + fail2ban + UFW; sudo still logs every command
+#     with the invoking identity (OWASP A09).
+echo "$DEPLOY_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/deploy
+chmod 440 /etc/sudoers.d/deploy
 install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" /home/$DEPLOY_USER/.ssh
 cp /root/.ssh/authorized_keys /home/$DEPLOY_USER/.ssh/authorized_keys
 chown "$DEPLOY_USER:$DEPLOY_USER" /home/$DEPLOY_USER/.ssh/authorized_keys
