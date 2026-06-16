@@ -68,20 +68,18 @@ public class SpeedSmsOtpPort implements SmsOtpPort {
                 .defaultHeaders(headers -> headers.setBasicAuth(accessToken, "x"))
                 .build();
         this.smsType = smsType;
-        this.sender = sender;
+        // sms_type=4 is SpeedSMS's shared "Notify" brand — sender must be the literal
+        // string "Notify". A blank sender causes "sender not found" rejection.
+        this.sender = (sender == null || sender.isBlank()) ? "Notify" : sender;
     }
 
     @Override
     public void sendOtp(String phoneNumber, String otpCode) {
-        // sms_type=4 (shared Notify sender) does not accept a sender field —
-        // sending sender="" causes SpeedSMS to reject with a non-standard error body.
         var body = new HashMap<String, Object>();
         body.put("to", List.of(phoneNumber));
         body.put("content", MESSAGE_TEMPLATE.formatted(otpCode));
         body.put("sms_type", smsType);
-        if (sender != null && !sender.isBlank()) {
-            body.put("sender", sender);
-        }
+        body.put("sender", sender);
 
         SpeedSmsSendResponse response;
         try {
