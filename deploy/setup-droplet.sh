@@ -50,10 +50,17 @@ MaxAuthTries 3
 EOF
 systemctl reload ssh
 
-echo "==> [4/8] Firewall — SSH (rate-limited), HTTP, HTTPS; everything else closed"
+echo "==> [4/8] Firewall — SSH, HTTP, HTTPS; everything else closed"
 ufw default deny incoming
 ufw default allow outgoing
-ufw limit 22/tcp    # built-in brute-force throttle
+# Plain allow, NOT `ufw limit` — limit's 6-connections/30s-per-source-IP throttle
+# drops the *second* SSH connection a CD deploy opens (one for SCP, one for the
+# remote exec session) when both land within the window, breaking
+# appleboy/scp-action with an opaque "dial tcp ...:22: i/o timeout" (the drop is
+# logged as "[UFW LIMIT BLOCK]", easy to miss when grepping for "UFW BLOCK").
+# SSH is already key-only (PasswordAuthentication no) so password brute-forcing
+# is impossible regardless; fail2ban still bans on repeated failures.
+ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow 443/udp   # HTTP/3

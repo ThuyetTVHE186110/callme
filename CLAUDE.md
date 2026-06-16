@@ -156,7 +156,7 @@
    > Secrets runtime (JWT_SECRET, DB_PASSWORD, SPEEDSMS_ACCESS_TOKEN, CORS) sống trong
    > `/opt/callme/.env` chmod 600 — không bao giờ trong repo; secrets CI (host/user/SSH key)
    > trong GitHub Actions secrets. Droplet hardening một lần qua `deploy/setup-droplet.sh`
-   > (user `deploy`, tắt root+password SSH, UFW 22-limit/80/443 + DO cloud firewall hai lớp,
+   > (user `deploy`, tắt root+password SSH, UFW 22/80/443 + DO cloud firewall hai lớp,
    > fail2ban, unattended-upgrades, swap 2G, log rotation). `server.shutdown: graceful`
    > (20s) để deploy giữa giờ cao điểm không chém ngang request complete-trip/thanh toán.
    > Backup: `pg_dump` hằng đêm giữ 14 ngày (`deploy/backup-db.sh` + cron) — **chưa** phải
