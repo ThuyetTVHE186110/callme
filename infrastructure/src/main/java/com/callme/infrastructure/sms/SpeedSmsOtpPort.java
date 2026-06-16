@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -72,16 +73,22 @@ public class SpeedSmsOtpPort implements SmsOtpPort {
 
     @Override
     public void sendOtp(String phoneNumber, String otpCode) {
+        // sms_type=4 (shared Notify sender) does not accept a sender field —
+        // sending sender="" causes SpeedSMS to reject with a non-standard error body.
+        var body = new HashMap<String, Object>();
+        body.put("to", List.of(phoneNumber));
+        body.put("content", MESSAGE_TEMPLATE.formatted(otpCode));
+        body.put("sms_type", smsType);
+        if (sender != null && !sender.isBlank()) {
+            body.put("sender", sender);
+        }
+
         SpeedSmsSendResponse response;
         try {
             response = restClient.post()
                     .uri(SEND_URL)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of(
-                            "to", List.of(phoneNumber),
-                            "content", MESSAGE_TEMPLATE.formatted(otpCode),
-                            "sms_type", smsType,
-                            "sender", sender))
+                    .body(body)
                     .retrieve()
                     .body(SpeedSmsSendResponse.class);
         } catch (RestClientException ex) {
@@ -91,11 +98,12 @@ public class SpeedSmsOtpPort implements SmsOtpPort {
 
         if (response == null || !SUCCESS_STATUS.equals(response.status())) {
             // The gateway answered 200 but refused the message (bad token, out of
-            // credit, blocked number...). Its error code is operator-facing detail —
-            // log it, never surface it.
-            String gatewayCode = response == null ? "<empty body>" : response.code();
-            log.error("SpeedSMS rejected OTP send to {} — gateway code {}", maskPhone(phoneNumber), gatewayCode);
-            throw new SmsDeliveryException("SpeedSMS rejected the message (gateway code " + gatewayCode + ")");
+            // credit, blocked number...). Log status+code for ops; never surface to client.
+            String gatewayStatus = response == null ? "<empty body>" : response.status();
+            String gatewayCode   = response == null ? "<empty body>" : response.code();
+            log.error("SpeedSMS rejected OTP send to {} — status={} code={}",
+                    maskPhone(phoneNumber), gatewayStatus, gatewayCode);
+            throw new SmsDeliveryException("SpeedSMS rejected the message (status=" + gatewayStatus + ")");
         }
         log.info("OTP SMS accepted by SpeedSMS for phone {}", maskPhone(phoneNumber));
     }
