@@ -44,6 +44,7 @@ services:
       SPEEDSMS_ACCESS_TOKEN: ${SPEEDSMS_ACCESS_TOKEN}
       SPEEDSMS_SMS_TYPE: ${SPEEDSMS_SMS_TYPE:-4}
       SPEEDSMS_SENDER: ${SPEEDSMS_SENDER:-}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
     depends_on:
       db:
         condition: service_healthy
