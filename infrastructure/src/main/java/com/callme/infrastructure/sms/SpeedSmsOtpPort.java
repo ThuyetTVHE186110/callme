@@ -55,8 +55,8 @@ public class SpeedSmsOtpPort implements SmsOtpPort {
     private final int smsType;
     private final String sender;
 
-    /** Gateway response envelope — only the fields the adapter acts on (Jackson 3 ignores the rest by default). */
-    record SpeedSmsSendResponse(String status, String code) {
+    /** Gateway response envelope — Jackson ignores unknown fields by default. */
+    record SpeedSmsSendResponse(String status, String code, String message) {
     }
 
     public SpeedSmsOtpPort(RestClient.Builder restClientBuilder,
@@ -99,10 +99,11 @@ public class SpeedSmsOtpPort implements SmsOtpPort {
         if (response == null || !SUCCESS_STATUS.equals(response.status())) {
             // The gateway answered 200 but refused the message (bad token, out of
             // credit, blocked number...). Log status+code for ops; never surface to client.
-            String gatewayStatus = response == null ? "<empty body>" : response.status();
-            String gatewayCode   = response == null ? "<empty body>" : response.code();
-            log.error("SpeedSMS rejected OTP send to {} — status={} code={}",
-                    maskPhone(phoneNumber), gatewayStatus, gatewayCode);
+            String gatewayStatus  = response == null ? "<empty body>" : response.status();
+            String gatewayCode    = response == null ? "<empty body>" : response.code();
+            String gatewayMessage = response == null ? "<empty body>" : response.message();
+            log.error("SpeedSMS rejected OTP send to {} — status={} code={} message={}",
+                    maskPhone(phoneNumber), gatewayStatus, gatewayCode, gatewayMessage);
             throw new SmsDeliveryException("SpeedSMS rejected the message (status=" + gatewayStatus + ")");
         }
         log.info("OTP SMS accepted by SpeedSMS for phone {}", maskPhone(phoneNumber));
