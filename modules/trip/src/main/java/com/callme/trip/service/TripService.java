@@ -23,6 +23,14 @@ public interface TripService {
     /** Look up the most recent trip belonging to a booking — allows the client to get tripId right after booking confirmation. */
     TripResponse getByBooking(UUID bookingId, AuthenticatedAccount requester);
 
+    /**
+     * Returns the caller's current active trip (STARTED / ARRIVED_AT_PICKUP / IN_PROGRESS).
+     * Empty when no active trip exists. Used by the driver app to resolve tripId after
+     * receiving a BOOKING_CONFIRMED notification — the notification carries bookingId as
+     * referenceId, but this endpoint avoids forcing the driver to know the bookingId.
+     */
+    java.util.Optional<TripResponse> getActiveForDriver(AuthenticatedAccount requester);
+
     /** CLAUDE.md §5 — driver reaches the pickup point but has not yet taken the wheel; starts the no-show clock. */
     void arriveAtPickup(UUID tripId, AuthenticatedAccount requester);
 

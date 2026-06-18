@@ -26,14 +26,19 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public UUID notify(UUID recipientId, NotificationType type, String message) {
-        return notificationRepository.save(new Notification(recipientId, type, message)).getId();
+        return notify(recipientId, type, message, null);
+    }
+
+    @Override
+    public UUID notify(UUID recipientId, NotificationType type, String message, UUID referenceId) {
+        return notificationRepository.save(new Notification(recipientId, type, message, referenceId)).getId();
     }
 
     @Override
     public List<NotificationResponse> listFor(UUID recipientId, AuthenticatedAccount requester) {
         requireRecipient(recipientId, requester);
         return notificationRepository.findByRecipientIdOrderByCreatedAtDesc(recipientId).stream()
-                .map(n -> new NotificationResponse(n.getId(), n.getRecipientId(), n.getType(), n.getMessage(), n.isRead(), n.getCreatedAt()))
+                .map(n -> new NotificationResponse(n.getId(), n.getRecipientId(), n.getType(), n.getMessage(), n.isRead(), n.getCreatedAt(), n.getReferenceId()))
                 .toList();
     }
 

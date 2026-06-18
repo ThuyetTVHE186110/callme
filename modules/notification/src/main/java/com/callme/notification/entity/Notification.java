@@ -29,14 +29,22 @@ public class Notification {
 
     private String message;
 
+    /** The trip or booking this notification relates to — allows the mobile app to navigate directly to the right screen. Null for non-trip notifications (e.g. VERIFICATION_EXPIRED). */
+    private UUID referenceId;
+
     private boolean read;
 
     private Instant createdAt;
 
     public Notification(UUID recipientId, NotificationType type, String message) {
+        this(recipientId, type, message, null);
+    }
+
+    public Notification(UUID recipientId, NotificationType type, String message, UUID referenceId) {
         this.recipientId = recipientId;
         this.type = type;
         this.message = message;
+        this.referenceId = referenceId;
         this.read = false;
         this.createdAt = Instant.now();
     }

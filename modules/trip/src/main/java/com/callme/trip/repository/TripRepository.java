@@ -33,6 +33,9 @@ public interface TripRepository extends JpaRepository<Trip, UUID> {
     /** Returns the most recent trip for a booking regardless of status — used by the by-booking lookup endpoint. */
     Optional<Trip> findFirstByBookingIdOrderByIdDesc(UUID bookingId);
 
+    /** Returns the driver's current active trip — used by GET /api/trips/my-active so the driver app can find its tripId after a BOOKING_CONFIRMED notification. */
+    Optional<Trip> findFirstByDriverIdAndStatusInOrderByCreatedAtDesc(UUID driverId, Collection<TripStatus> statuses);
+
     /**
      * CLAUDE.md G — Postgres transaction-scoped advisory lock guarding the periodic
      * sweeps against double-firing when more than one app instance runs. Non-blocking:

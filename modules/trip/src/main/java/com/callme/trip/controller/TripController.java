@@ -1,5 +1,6 @@
 package com.callme.trip.controller;
 
+import com.callme.common.exception.NotFoundException;
 import com.callme.common.response.ApiResponse;
 import com.callme.common.security.AuthenticatedAccount;
 import com.callme.common.shared.GeoPoint;
@@ -51,6 +52,20 @@ public class TripController {
     @GetMapping("/by-booking/{bookingId}")
     public ApiResponse<TripResponse> getByBooking(@PathVariable UUID bookingId, @AuthenticationPrincipal AuthenticatedAccount account) {
         return ApiResponse.ok(tripService.getByBooking(bookingId, account));
+    }
+
+    /**
+     * Driver app entry point: returns the caller's current active trip
+     * (STARTED / ARRIVED_AT_PICKUP / IN_PROGRESS). Call this after receiving a
+     * BOOKING_CONFIRMED notification to get the tripId needed for all subsequent
+     * driver actions. Returns 404 when no active trip exists (idle state).
+     */
+    @GetMapping("/my-active")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ApiResponse<TripResponse> getActiveForDriver(@AuthenticationPrincipal AuthenticatedAccount account) {
+        return tripService.getActiveForDriver(account)
+                .map(ApiResponse::ok)
+                .orElseThrow(() -> new NotFoundException("Không có chuyến đang hoạt động"));
     }
 
     /** CLAUDE.md §5 — driver reaches the pickup point (not yet behind the wheel); starts the no-show clock. */

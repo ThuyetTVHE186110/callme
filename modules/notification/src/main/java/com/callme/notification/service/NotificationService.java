@@ -11,6 +11,9 @@ public interface NotificationService {
 
     UUID notify(UUID recipientId, NotificationType type, String message);
 
+    /** Overload that attaches a referenceId (tripId or bookingId) for deep-linking in the mobile app. */
+    UUID notify(UUID recipientId, NotificationType type, String message, UUID referenceId);
+
     List<NotificationResponse> listFor(UUID recipientId, AuthenticatedAccount requester);
 
     void markRead(UUID notificationId, AuthenticatedAccount requester);

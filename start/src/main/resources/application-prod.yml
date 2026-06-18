@@ -60,18 +60,22 @@ app:
     secret: ${JWT_SECRET}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:1440}
   sms:
-    # CLAUDE.md §4.8 — SpeedSMS is the live provider (free integration credit first;
-    # ZNS-first/eSMS are documented later steps). The access token has NO default:
-    # missing SPEEDSMS_ACCESS_TOKEN fails the boot loudly, same posture as JWT_SECRET
-    # — going live with the `logging` fake would print real OTP codes into prod logs.
-    provider: ${SMS_PROVIDER:speedsms}
+    # CLAUDE.md §4.8 — set SMS_PROVIDER to one of:
+    #   esms      — eSMS esms.vn (ESMS_API_KEY + ESMS_SECRET_KEY required;
+    #               ESMS_SANDBOX=1 for staging: accepted, visible in portal, 0 credit)
+    #   speedsms  — SpeedSMS (SPEEDSMS_ACCESS_TOKEN + registered sender required)
+    #   logging   — dev/test ONLY; prints OTP to log, never use in prod
+    # No default (fail-loud) — same posture as JWT_SECRET.
+    provider: ${SMS_PROVIDER}
+    esms:
+      api-key: ${ESMS_API_KEY:}
+      secret-key: ${ESMS_SECRET_KEY:}
+      sms-type: ${ESMS_SMS_TYPE:2}
+      sandbox: ${ESMS_SANDBOX:0}
     speedsms:
-      access-token: ${SPEEDSMS_ACCESS_TOKEN}
-      # 4 = SpeedSMS's shared "Notify" sender — works with the free credit, no
-      # registered brandname needed. Once the CallMe brandname clears carrier
-      # registration: SPEEDSMS_SMS_TYPE=3 + SPEEDSMS_SENDER=<brand>, no code change.
+      access-token: ${SPEEDSMS_ACCESS_TOKEN:}
       sms-type: ${SPEEDSMS_SMS_TYPE:4}
-      sender: ${SPEEDSMS_SENDER:}
+      sender: ${SPEEDSMS_SENDER:Notify}
   cors:
     # No default — forces an explicit, reviewed list of real origins at deploy time,
     # the same posture as JWT_SECRET/DB_* above (CLAUDE.md production posture: no

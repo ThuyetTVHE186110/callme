@@ -169,6 +169,13 @@ public class TripServiceImpl implements TripService {
         return toResponse(trip);
     }
 
+    @Override
+    public java.util.Optional<TripResponse> getActiveForDriver(AuthenticatedAccount requester) {
+        return tripRepository
+                .findFirstByDriverIdAndStatusInOrderByCreatedAtDesc(requester.profileId(), ACTIVE_TRIP_STATUSES)
+                .map(this::toResponse);
+    }
+
     /**
      * CLAUDE.md §5 — only the assigned driver, physically there, can confirm they
      * reached the pickup point. This starts the no-show clock ({@link #cancelNoShow})

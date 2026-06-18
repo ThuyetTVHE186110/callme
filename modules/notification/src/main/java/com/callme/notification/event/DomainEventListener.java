@@ -31,10 +31,14 @@ public class DomainEventListener {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onBookingConfirmed(BookingConfirmedEvent event) {
+        // referenceId = bookingId: customer uses it for GET /api/trips/by-booking/{bookingId};
+        // driver uses it as context then calls GET /api/trips/my-active to resolve tripId.
         notificationService.notify(event.customerId(), NotificationType.BOOKING_CONFIRMED,
-                "Đã tìm thấy tài xế cho chuyến của bạn — tài xế đang trên đường đến điểm đón.");
+                "Đã tìm thấy tài xế cho chuyến của bạn — tài xế đang trên đường đến điểm đón.",
+                event.bookingId());
         notificationService.notify(event.driverId(), NotificationType.BOOKING_CONFIRMED,
-                "Bạn vừa được gán một chuyến lái xe hộ mới — vui lòng di chuyển đến điểm đón khách.");
+                "Bạn vừa được gán một chuyến lái xe hộ mới — vui lòng di chuyển đến điểm đón khách.",
+                event.bookingId());
     }
 
     /**
@@ -48,7 +52,7 @@ public class DomainEventListener {
     public void onSosRaised(SosRaisedEvent event) {
         String message = "⚠ Đã có báo động khẩn cấp trên chuyến đi của bạn — tổng đài đang được thông báo, vui lòng giữ an toàn.";
         UUID otherParty = event.raisedByProfileId().equals(event.customerId()) ? event.driverId() : event.customerId();
-        notificationService.notify(otherParty, NotificationType.SOS_RAISED, message);
+        notificationService.notify(otherParty, NotificationType.SOS_RAISED, message, event.tripId());
     }
 
     /**
@@ -61,9 +65,11 @@ public class DomainEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onGpsSignalLost(GpsSignalLostEvent event) {
         notificationService.notify(event.customerId(), NotificationType.GPS_SIGNAL_LOST,
-                "Mất tín hiệu định vị của tài xế trong chuyến đi của bạn — tổng đài đang theo dõi sát chuyến này.");
+                "Mất tín hiệu định vị của tài xế trong chuyến đi của bạn — tổng đài đang theo dõi sát chuyến này.",
+                event.tripId());
         notificationService.notify(event.driverId(), NotificationType.GPS_SIGNAL_LOST,
-                "Ứng dụng đang mất tín hiệu định vị của bạn — vui lòng kiểm tra kết nối mạng/GPS để chuyến đi được ghi nhận chính xác.");
+                "Ứng dụng đang mất tín hiệu định vị của bạn — vui lòng kiểm tra kết nối mạng/GPS để chuyến đi được ghi nhận chính xác.",
+                event.tripId());
     }
 
     /**
@@ -76,9 +82,11 @@ public class DomainEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onTripAbortedMidway(TripAbortedMidwayEvent event) {
         notificationService.notify(event.customerId(), NotificationType.TRIP_ABORTED_MIDWAY,
-                "Chuyến đi của bạn đã kết thúc sớm giữa đường — tài xế đã đưa bạn và xe đến nơi an toàn. Tổng đài đã được thông báo và sẽ liên hệ hỗ trợ.");
+                "Chuyến đi của bạn đã kết thúc sớm giữa đường — tài xế đã đưa bạn và xe đến nơi an toàn. Tổng đài đã được thông báo và sẽ liên hệ hỗ trợ.",
+                event.tripId());
         notificationService.notify(event.driverId(), NotificationType.TRIP_ABORTED_MIDWAY,
-                "Báo cáo kết thúc khẩn cấp giữa chuyến của bạn đã được ghi nhận — tổng đài sẽ xem xét và hỗ trợ điều phối tiếp theo.");
+                "Báo cáo kết thúc khẩn cấp giữa chuyến của bạn đã được ghi nhận — tổng đài sẽ xem xét và hỗ trợ điều phối tiếp theo.",
+                event.tripId());
     }
 
     /**
@@ -90,9 +98,11 @@ public class DomainEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onIncidentReported(IncidentReportedEvent event) {
         notificationService.notify(event.customerId(), NotificationType.INCIDENT_REPORTED,
-                "Một sự cố/va chạm trên chuyến đi của bạn đã được ghi nhận — tổng đài sẽ xem xét và liên hệ nếu cần.");
+                "Một sự cố/va chạm trên chuyến đi của bạn đã được ghi nhận — tổng đài sẽ xem xét và liên hệ nếu cần.",
+                event.tripId());
         notificationService.notify(event.driverId(), NotificationType.INCIDENT_REPORTED,
-                "Một sự cố/va chạm trên chuyến đi của bạn đã được ghi nhận — tổng đài sẽ xem xét và liên hệ nếu cần.");
+                "Một sự cố/va chạm trên chuyến đi của bạn đã được ghi nhận — tổng đài sẽ xem xét và liên hệ nếu cần.",
+                event.tripId());
     }
 
     /**
@@ -105,9 +115,11 @@ public class DomainEventListener {
     public void onTripDestinationChanged(TripDestinationChangedEvent event) {
         String fare = event.newFareEstimate().amount() + " " + event.newFareEstimate().currency().getCurrencyCode();
         notificationService.notify(event.customerId(), NotificationType.DESTINATION_CHANGED,
-                "Điểm đến của chuyến đi đã được cập nhật — cước ước tính mới: " + fare + " (cước cuối tính tại thời điểm hoàn thành).");
+                "Điểm đến của chuyến đi đã được cập nhật — cước ước tính mới: " + fare + " (cước cuối tính tại thời điểm hoàn thành).",
+                event.tripId());
         notificationService.notify(event.driverId(), NotificationType.DESTINATION_CHANGED,
-                "Khách đã đổi điểm đến của chuyến đi — cước ước tính mới: " + fare + ".");
+                "Khách đã đổi điểm đến của chuyến đi — cước ước tính mới: " + fare + ".",
+                event.tripId());
     }
 
     /**
@@ -125,8 +137,10 @@ public class DomainEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onTripCompleted(TripCompletedEvent event) {
         notificationService.notify(event.customerId(), NotificationType.TRIP_COMPLETED,
-                "Chuyến đi đã hoàn tất. Cước phí: " + event.finalFare().amount() + " " + event.finalFare().currency().getCurrencyCode());
+                "Chuyến đi đã hoàn tất. Cước phí: " + event.finalFare().amount() + " " + event.finalFare().currency().getCurrencyCode(),
+                event.tripId());
         notificationService.notify(event.driverId(), NotificationType.TRIP_COMPLETED,
-                "Bạn đã hoàn thành chuyến lái xe hộ. Vui lòng xác nhận thanh toán với khách.");
+                "Bạn đã hoàn thành chuyến lái xe hộ. Vui lòng xác nhận thanh toán với khách.",
+                event.tripId());
     }
 }
