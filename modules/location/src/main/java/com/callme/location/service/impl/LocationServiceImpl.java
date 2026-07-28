@@ -1,8 +1,11 @@
 package com.callme.location.service.impl;
 
+import com.callme.common.event.CustomerLocationUpdatedEvent;
 import com.callme.common.event.DriverLocationUpdatedEvent;
 import com.callme.common.shared.GeoPoint;
+import com.callme.location.entity.CustomerLocationUpdate;
 import com.callme.location.entity.LocationUpdate;
+import com.callme.location.repository.CustomerLocationUpdateRepository;
 import com.callme.location.repository.LocationUpdateRepository;
 import com.callme.location.service.LocationService;
 import org.springframework.context.ApplicationEventPublisher;
@@ -16,10 +19,14 @@ import java.util.UUID;
 public class LocationServiceImpl implements LocationService {
 
     private final LocationUpdateRepository locationUpdateRepository;
+    private final CustomerLocationUpdateRepository customerLocationUpdateRepository;
     private final ApplicationEventPublisher events;
 
-    public LocationServiceImpl(LocationUpdateRepository locationUpdateRepository, ApplicationEventPublisher events) {
+    public LocationServiceImpl(LocationUpdateRepository locationUpdateRepository,
+                               CustomerLocationUpdateRepository customerLocationUpdateRepository,
+                               ApplicationEventPublisher events) {
         this.locationUpdateRepository = locationUpdateRepository;
+        this.customerLocationUpdateRepository = customerLocationUpdateRepository;
         this.events = events;
     }
 
@@ -33,5 +40,12 @@ public class LocationServiceImpl implements LocationService {
     public void reportLocation(UUID driverId, double latitude, double longitude) {
         locationUpdateRepository.save(new LocationUpdate(driverId, latitude, longitude));
         events.publishEvent(new DriverLocationUpdatedEvent(driverId, new GeoPoint(latitude, longitude)));
+    }
+
+    /** Same shape as {@link #reportLocation} but for the customer side — see CLAUDE.local.md §3 (driver sees customer's location). */
+    @Override
+    public void reportCustomerLocation(UUID customerId, double latitude, double longitude) {
+        customerLocationUpdateRepository.save(new CustomerLocationUpdate(customerId, latitude, longitude));
+        events.publishEvent(new CustomerLocationUpdatedEvent(customerId, new GeoPoint(latitude, longitude)));
     }
 }

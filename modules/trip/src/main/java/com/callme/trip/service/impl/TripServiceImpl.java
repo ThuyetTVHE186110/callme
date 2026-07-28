@@ -12,6 +12,7 @@ import com.callme.common.event.TripDestinationChangedEvent;
 import com.callme.common.exception.ConflictException;
 import com.callme.common.exception.ForbiddenException;
 import com.callme.common.exception.NotFoundException;
+import com.callme.common.port.CustomerLocationPort;
 import com.callme.common.port.DriverLocationFreshnessPort;
 import com.callme.common.port.DriverRouteTracePort;
 import com.callme.common.port.FareEstimationPort;
@@ -19,7 +20,9 @@ import com.callme.common.security.AuthenticatedAccount;
 import com.callme.common.shared.CancellationReason;
 import com.callme.common.shared.GeoPoint;
 import com.callme.common.shared.Money;
+import com.callme.trip.dto.CustomerLocationResponse;
 import com.callme.trip.dto.DestinationChangeResponse;
+import com.callme.trip.dto.DriverLocationResponse;
 import com.callme.trip.dto.EmergencyAbortReportResponse;
 import com.callme.trip.dto.IncidentReportResponse;
 import com.callme.trip.dto.RouteDeviationFlagResponse;
@@ -125,6 +128,7 @@ public class TripServiceImpl implements TripService {
     private final IncidentReportRepository incidentReportRepository;
     private final FareEstimationPort fareEstimationPort;
     private final DriverLocationFreshnessPort driverLocationFreshnessPort;
+    private final CustomerLocationPort customerLocationPort;
     private final DriverRouteTracePort driverRouteTracePort;
     private final ApplicationEventPublisher events;
 
@@ -133,6 +137,7 @@ public class TripServiceImpl implements TripService {
                            EmergencyAbortReportRepository emergencyAbortReportRepository,
                            IncidentReportRepository incidentReportRepository,
                            FareEstimationPort fareEstimationPort, DriverLocationFreshnessPort driverLocationFreshnessPort,
+                           CustomerLocationPort customerLocationPort,
                            DriverRouteTracePort driverRouteTracePort,
                            ApplicationEventPublisher events) {
         this.tripRepository = tripRepository;
@@ -142,6 +147,7 @@ public class TripServiceImpl implements TripService {
         this.incidentReportRepository = incidentReportRepository;
         this.fareEstimationPort = fareEstimationPort;
         this.driverLocationFreshnessPort = driverLocationFreshnessPort;
+        this.customerLocationPort = customerLocationPort;
         this.driverRouteTracePort = driverRouteTracePort;
         this.events = events;
     }
@@ -159,6 +165,24 @@ public class TripServiceImpl implements TripService {
         var trip = findOrThrow(tripId);
         requireParticipant(trip, requester);
         return toResponse(trip);
+    }
+
+    @Override
+    public DriverLocationResponse getDriverLocation(UUID tripId, AuthenticatedAccount requester) {
+        var trip = findOrThrow(tripId);
+        requireParticipant(trip, requester);
+        var snapshot = driverLocationFreshnessPort.currentLocation(trip.getDriverId())
+                .orElseThrow(() -> new NotFoundException("Tài xế chưa gửi vị trí"));
+        return new DriverLocationResponse(trip.getDriverId(), snapshot.latitude(), snapshot.longitude(), snapshot.updatedAt());
+    }
+
+    @Override
+    public CustomerLocationResponse getCustomerLocation(UUID tripId, AuthenticatedAccount requester) {
+        var trip = findOrThrow(tripId);
+        requireParticipant(trip, requester);
+        var snapshot = customerLocationPort.currentLocation(trip.getCustomerId())
+                .orElseThrow(() -> new NotFoundException("Khách hàng chưa gửi vị trí"));
+        return new CustomerLocationResponse(trip.getCustomerId(), snapshot.latitude(), snapshot.longitude(), snapshot.updatedAt());
     }
 
     @Override

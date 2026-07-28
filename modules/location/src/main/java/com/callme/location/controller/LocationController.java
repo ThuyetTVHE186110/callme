@@ -37,4 +37,20 @@ public class LocationController {
         locationService.reportLocation(driverId, request.latitude(), request.longitude());
         return ApiResponse.ok(null);
     }
+
+    /**
+     * Lets the assigned driver see the customer approaching/waiting at pickup —
+     * symmetric to {@link #report}, but customers report this voluntarily (no
+     * mounted device pushing GPS every few seconds like a driver's app).
+     */
+    @PostMapping("/customers/{customerId}")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    public ApiResponse<Void> reportCustomerLocation(@PathVariable UUID customerId, @Valid @RequestBody ReportLocationRequest request,
+                                                    @AuthenticationPrincipal AuthenticatedAccount account) {
+        if (!account.ownsProfile(customerId)) {
+            throw new ForbiddenException("Bạn chỉ có thể báo cáo vị trí của chính mình");
+        }
+        locationService.reportCustomerLocation(customerId, request.latitude(), request.longitude());
+        return ApiResponse.ok(null);
+    }
 }

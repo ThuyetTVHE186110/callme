@@ -10,6 +10,7 @@ import com.callme.identity.service.CustomerService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -36,5 +37,13 @@ public class CustomerServiceImpl implements CustomerService {
         var customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy khách hàng: " + customerId));
         return new CustomerResponse(customer.getId(), customer.getFullName(), customer.getPhoneNumber(), customer.getEmail());
+    }
+
+    @Override
+    public void updateLocation(UUID customerId, double latitude, double longitude) {
+        var customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy khách hàng: " + customerId));
+        customer.updateLocation(latitude, longitude, Instant.now());
+        customerRepository.save(customer);
     }
 }

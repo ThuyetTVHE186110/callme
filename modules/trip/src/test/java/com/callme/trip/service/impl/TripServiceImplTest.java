@@ -2,6 +2,7 @@ package com.callme.trip.service.impl;
 
 import com.callme.common.event.TripAbortedMidwayEvent;
 import com.callme.common.exception.ForbiddenException;
+import com.callme.common.port.CustomerLocationPort;
 import com.callme.common.port.DriverLocationFreshnessPort;
 import com.callme.common.port.DriverRouteTracePort;
 import com.callme.common.port.FareEstimationPort;
@@ -51,11 +52,12 @@ class TripServiceImplTest {
     private final IncidentReportRepository incidentReportRepository = mock(IncidentReportRepository.class);
     private final FareEstimationPort fareEstimationPort = mock(FareEstimationPort.class);
     private final DriverLocationFreshnessPort driverLocationFreshnessPort = mock(DriverLocationFreshnessPort.class);
+    private final CustomerLocationPort customerLocationPort = mock(CustomerLocationPort.class);
     private final DriverRouteTracePort driverRouteTracePort = mock(DriverRouteTracePort.class);
     private final org.springframework.context.ApplicationEventPublisher events = mock(org.springframework.context.ApplicationEventPublisher.class);
 
     private final TripServiceImpl service = new TripServiceImpl(tripRepository, sosAlertRepository, routeDeviationFlagRepository,
-            emergencyAbortReportRepository, incidentReportRepository, fareEstimationPort, driverLocationFreshnessPort, driverRouteTracePort, events);
+            emergencyAbortReportRepository, incidentReportRepository, fareEstimationPort, driverLocationFreshnessPort, customerLocationPort, driverRouteTracePort, events);
 
     private final AuthenticatedAccount driver = new AuthenticatedAccount(UUID.randomUUID(), DRIVER_ID, AccountRole.DRIVER);
     private final AuthenticatedAccount customer = new AuthenticatedAccount(UUID.randomUUID(), CUSTOMER_ID, AccountRole.CUSTOMER);

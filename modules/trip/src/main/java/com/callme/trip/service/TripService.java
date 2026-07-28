@@ -3,7 +3,9 @@ package com.callme.trip.service;
 import com.callme.common.security.AuthenticatedAccount;
 import com.callme.common.shared.CancellationReason;
 import com.callme.common.shared.GeoPoint;
+import com.callme.trip.dto.CustomerLocationResponse;
 import com.callme.trip.dto.DestinationChangeResponse;
+import com.callme.trip.dto.DriverLocationResponse;
 import com.callme.trip.dto.EmergencyAbortReportResponse;
 import com.callme.trip.dto.IncidentReportResponse;
 import com.callme.trip.dto.RouteDeviationFlagResponse;
@@ -30,6 +32,24 @@ public interface TripService {
      * referenceId, but this endpoint avoids forcing the driver to know the bookingId.
      */
     java.util.Optional<TripResponse> getActiveForDriver(AuthenticatedAccount requester);
+
+    /**
+     * Lets either trip participant see the assigned driver's last known GPS fix —
+     * closes the gap noted in CLAUDE.local.md §8 ("không có nguồn dữ liệu cho màn
+     * 'xe đang ở đâu'"). Backed by {@link com.callme.common.port.DriverLocationFreshnessPort},
+     * the same cross-module read the GPS-loss sweep (CLAUDE.md C.7) already uses.
+     * 404s when the driver has never reported a location yet.
+     */
+    DriverLocationResponse getDriverLocation(UUID tripId, AuthenticatedAccount requester);
+
+    /**
+     * Symmetric counterpart to {@link #getDriverLocation}: lets either participant
+     * see the customer's last known GPS fix (typically used by the driver while
+     * en route to or waiting at pickup). Customers report location voluntarily —
+     * unlike a driver's mounted device, there is no expectation of a steady stream,
+     * so this 404s far more often in practice.
+     */
+    CustomerLocationResponse getCustomerLocation(UUID tripId, AuthenticatedAccount requester);
 
     /** CLAUDE.md §5 — driver reaches the pickup point but has not yet taken the wheel; starts the no-show clock. */
     void arriveAtPickup(UUID tripId, AuthenticatedAccount requester);

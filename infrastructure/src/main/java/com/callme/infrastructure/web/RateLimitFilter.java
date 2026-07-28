@@ -39,6 +39,10 @@ import java.util.concurrent.ConcurrentMap;
  *   <li>{@code POST /api/locations/{driverId}} — keyed by the authenticated driver;
  *       generously sized around the documented push cadence (CLAUDE.md G.3:
  *       10–15s normally, 5s mid-trip) so a compliant client never notices it.</li>
+ *   <li>{@code POST /api/locations/customers/{customerId}} — same shape, keyed by
+ *       the authenticated customer. Reports are voluntary (no mounted device
+ *       pushing on a fixed cadence like a driver's app), so the same generous cap
+ *       is a ceiling, not a target rate.</li>
  * </ul>
  *
  * Single-instance MVP (per CLAUDE.md, this domain doesn't call for a multi-node
@@ -71,7 +75,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             new Rule("POST", PATTERN_PARSER.parse("/api/auth/forgot-password"), false, 3, Duration.ofMinutes(1)),
             new Rule("POST", PATTERN_PARSER.parse("/api/auth/reset-password"), false, 10, Duration.ofMinutes(1)),
             new Rule("POST", PATTERN_PARSER.parse("/api/bookings"), true, 10, Duration.ofMinutes(1)),
-            new Rule("POST", PATTERN_PARSER.parse("/api/locations/{driverId}"), true, 20, Duration.ofMinutes(1))
+            new Rule("POST", PATTERN_PARSER.parse("/api/locations/{driverId}"), true, 20, Duration.ofMinutes(1)),
+            new Rule("POST", PATTERN_PARSER.parse("/api/locations/customers/{customerId}"), true, 20, Duration.ofMinutes(1))
     );
 
     private final ConcurrentMap<String, Bucket> buckets = new ConcurrentHashMap<>();

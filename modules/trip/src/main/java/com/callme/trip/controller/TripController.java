@@ -6,7 +6,9 @@ import com.callme.common.security.AuthenticatedAccount;
 import com.callme.common.shared.GeoPoint;
 import com.callme.trip.dto.AbortInProgressTripRequest;
 import com.callme.trip.dto.ChangeDestinationRequest;
+import com.callme.trip.dto.CustomerLocationResponse;
 import com.callme.trip.dto.DestinationChangeResponse;
+import com.callme.trip.dto.DriverLocationResponse;
 import com.callme.trip.dto.EmergencyAbortReportResponse;
 import com.callme.trip.dto.IncidentReportResponse;
 import com.callme.trip.dto.PickUpCustomerRequest;
@@ -46,6 +48,27 @@ public class TripController {
     @GetMapping("/{tripId}")
     public ApiResponse<TripResponse> get(@PathVariable UUID tripId, @AuthenticationPrincipal AuthenticatedAccount account) {
         return ApiResponse.ok(tripService.get(tripId, account));
+    }
+
+    /**
+     * Lets either trip participant see the assigned driver's last known GPS fix —
+     * closes the gap noted in CLAUDE.local.md §8 ("chưa có nguồn dữ liệu cho màn
+     * 'xe đang ở đâu'"). 404 when the driver hasn't reported a location yet.
+     */
+    @GetMapping("/{tripId}/driver-location")
+    public ApiResponse<DriverLocationResponse> getDriverLocation(@PathVariable UUID tripId, @AuthenticationPrincipal AuthenticatedAccount account) {
+        return ApiResponse.ok(tripService.getDriverLocation(tripId, account));
+    }
+
+    /**
+     * Symmetric counterpart to {@link #getDriverLocation} — lets the assigned
+     * driver (or, for consistency, the customer/admin too) see the customer's last
+     * known GPS fix, e.g. while heading to or waiting at pickup. Customers report
+     * location voluntarily, so this 404s far more often than the driver side.
+     */
+    @GetMapping("/{tripId}/customer-location")
+    public ApiResponse<CustomerLocationResponse> getCustomerLocation(@PathVariable UUID tripId, @AuthenticationPrincipal AuthenticatedAccount account) {
+        return ApiResponse.ok(tripService.getCustomerLocation(tripId, account));
     }
 
     /** Returns the most recent trip for a given booking — use this right after booking confirmation to get the tripId. */
